@@ -170,7 +170,7 @@ The same blend scored on Open-Meteo's archive (same winters; day 1 / 3 / 5 / 7):
 ## Reproduce
 
 ```sh
-python3 research/openmeteo.py              # Open-Meteo archive (free API; OPENMETEO_APIKEY optional)
+python3 research/openmeteo.py              # Open-Meteo archive (free API)
 python3 research/skill.py 2024-03-01       # R5 and the Open-Meteo rows of R6
 ```
 
@@ -184,4 +184,4 @@ Scripts whose job is done live in git history:
 | `ff7801a` | `gribstream.py`, `skill.py` (GribStream source) | the R4 table and the GribStream rows of R6 |
 | `2d70f95` | `ifs9.py`, GFS decoding | dropped candidates |
 
-Downloads are cached in `.cache/` (gitignored). API keys come from the environment and never reach disk.
+Downloads are cached in `.cache/` (gitignored). No API keys needed.
