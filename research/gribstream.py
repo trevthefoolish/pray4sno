@@ -95,9 +95,15 @@ def fetch(model, runs):
 def main(model, first="2020", last="2025"):
     todo = [r for r in runs(model, int(first), int(last)) if not path(model, r).exists()]
     print(f"{model}: {len(todo)} runs to fetch", flush=True)
-    saved = []
-    for i in range(0, len(todo), BATCH):
-        batch = todo[i:i + BATCH]
+    batches = []                                   # consecutive runs: a request may span at most 92 days
+    for r in todo:
+        if batches and len(batches[-1]) < BATCH and r - batches[-1][0] < dt.timedelta(days=BATCH):
+            batches[-1].append(r)
+        else:
+            batches.append([r])
+    saved, i = [], 0
+    for batch in batches:
+        i += len(batch)
         try:
             text = fetch(model, batch)
         except QuotaExhausted as e:
