@@ -58,20 +58,11 @@ Phases 1 (research) and 2 (calibration) are complete. Every number below comes f
 
 ## R3. Archived forecasts
 
-| Source | What it has | Used |
+| Source | What it has | Used for |
 |---|---|---|
-| GribStream `/runs` (paid) | NBM 2020-, GFS 2021-, IFS 0.25° 2024-, AIFS 2025- at every lead, point queries | **Model selection** (R4): 6 winters, 2,700 runs. Dropped after R6 |
-| Open-Meteo Previous Runs (free) | 7 models from 2024, days 1-7 | **The source going forward** (R6) |
-| AWS NBM GRIB2 | NBM 2020- | Cross-check only: matches GribStream; 145 s CPU per run |
-
-**How each model's precipitation comes back** (all checked against the data):
-
-| Model | Format |
-|---|---|
-| NBM | 1-h totals to 36 h, then 6-h totals (rounded to 0.01") |
-| IFS | running total, in metres |
-| AIFS | running total, in mm |
-| GFS (dropped) | 6-h buckets through 2024; running total from 2025 |
+| **Open-Meteo Previous Runs** | 7 models from 2024, days 1-7 | Calibration, and the source going forward |
+| GribStream (paid, dropped after R6) | NBM 2020-, GFS 2021-, IFS 2024-, AIFS 2025-, every lead | Model selection: 6 winters, 2,700 runs |
+| AWS NBM GRIB2 | NBM 2020- | A one-off cross-check of GribStream |
 
 ## R4. Which models (same two winters for every model, 2024-03 to 2026-04)
 
@@ -148,14 +139,9 @@ The same blend scored on Open-Meteo's archive (same winters; day 1 / 3 / 5 / 7):
 
 ## R7. Live pipeline and cost
 
-**GribStream** serves NBM, IFS and AIFS live, from the same API the calibration was fit on.
-
-| | |
-|---|---|
-| Credits per refresh (both forecast points) | about 300 |
-| Every 3 h | about 2.4k credits/day, within the free tier (about 6k/day observed) |
-| Hourly | about 7.2k/day: Pro, $9.90/mo |
-| Open-Meteo | not needed in the final design. ERA5, if the snow-ratio work uses it, is available without the paid plan for non-commercial use |
+- **The page calls Open-Meteo's paid API from the browser.** The same models and endpoint family the calibration was fit on; no server.
+- **The free tier was dropped:** its per-IP limit blocks work from shared cloud machines.
+- **Trade-off:** the key is visible in the page source. Rotate it if it's abused; the plan has no overage charges.
 
 ## Phase 2: the calibration the page applies (`calibrate.py` → `calibration.json`)
 
@@ -195,12 +181,8 @@ Separate ratios per forecast day scored the same as one (14.0-16.3 vs 14.7).
 ## Gotchas found (fixed in code)
 
 - **NRCS dates each daily SNOTEL reading by the day it closes (24:00).** A one-day misalignment dropped the day-1 correlation from 0.78 to 0.15.
-- **GribStream quirks:**
-  - A quota cut truncates the response it lands in (HTTP 200), so batches are discarded on a quota stop.
-  - The API throttles request rate (429), and a single request may span at most 92 days.
-  - NOAA's missing value (9.999e20) can pass through.
-  - GFS switched formats in 2025, and tiny rounding dips can look like resets.
 - **Open-Meteo's `gfs_seamless` short-range archive is HRRR.**
+- **Open-Meteo's ECMWF archive has no snowfall,** only precipitation. Requiring every variable silently reduced the blend to NBM alone.
 
 ## Reproduce
 
