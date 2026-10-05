@@ -11,17 +11,21 @@ Scores per model x site x lead, leave-one-winter-out (fit on the other winters, 
          climatology = the site's mean for that calendar month. > 0 beats climatology.
 Also for multi-day totals, and for an equal-weight blend of the calibrated models.
 
-Usage: python3 research/skill.py [SINCE_DATE]   (after gribstream.py has filled .cache/gs/)
+Usage: python3 research/skill.py [SINCE_DATE] [gribstream|openmeteo]   (after the matching fetch script)
 """
 import collections
 import csv
 import datetime as dt
+import json
 import statistics as st
 
 from common import CACHE, SNOTEL, coop_daily, season, snotel_hourly
 
-MODELS = ["nbm", "ifsoper", "aifsoper"]
-BLENDS = {"blend": MODELS}                       # equal-weight mean of the calibrated models
+SOURCES = {  # models per data source, and the equal-weight blends of their calibrated forecasts
+    "gribstream": (["nbm", "ifsoper", "aifsoper"], {"blend": ["nbm", "ifsoper", "aifsoper"]}),
+    "openmeteo": (["om_nbm", "om_ifs", "om_aifs", "om_icon", "om_gem"],
+                  {"blend": ["om_nbm", "om_ifs", "om_aifs"], "blend+icon": ["om_nbm", "om_ifs", "om_aifs", "om_icon"]}),
+}
 SITES = ["base", "berthoud", "foolcreek"]
 SPANS = {"1": (1, 1), "2": (2, 2), "3": (3, 3), "4": (4, 4), "5": (5, 5), "6": (6, 6), "7": (7, 7),
          "8": (8, 8), "10": (10, 10), "12": (12, 12), "14": (14, 14),
@@ -49,6 +53,10 @@ def intervals(model, values):
 
 def load(model):
     """{(run_date, site): {lead_day: inches}} for complete 24 h windows."""
+    if model.startswith("om_"):                      # written by openmeteo.py
+        raw = json.loads((CACHE / "om" / f"{model}.json").read_text())
+        return {(dt.date.fromisoformat(k.split("|")[0]), k.split("|")[1]): {int(n): v for n, v in d.items()}
+                for k, d in raw.items()}
     out = {}
     for path in sorted((CACHE / "gs" / model).glob("*.csv")):
         run = dt.datetime.strptime(path.stem, "%Y%m%dT%H")
@@ -122,9 +130,10 @@ def skill(cal):
     return 1 - sse / sse_clim
 
 
-def main(since="2020-01-01"):
+def main(since="2020-01-01", source="gribstream"):
     """since: score only runs from this date, so models with different archives compare fairly."""
     since = dt.date.fromisoformat(since)
+    MODELS, BLENDS = SOURCES[source]
     data = {m: {k: v for k, v in load(m).items() if k[0] >= since} for m in MODELS}
     obs = truth(2020, 2025)
     for site in SITES:
@@ -142,7 +151,7 @@ def main(since="2020-01-01"):
         for name, models in BLENDS.items():
             cells = []
             for k in SPANS:
-                members = [cals[(m, k)] for m in models if cals[(m, k)]]
+                members = [cals[(m, k)] for m in models if cals.get((m, k))]
                 dates = set().union(*members) if members else set()
                 blend = {d: (st.mean(c[d][0] for c in members if d in c), next(c[d][1] for c in members if d in c))
                          for d in dates}

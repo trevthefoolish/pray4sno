@@ -23,7 +23,10 @@ Phase 1 is complete. Every number below comes from a script; see [Reproduce](#re
 4. **Snow-to-liquid ratio is the next big lever.**
    - The base's median is 13.6:1 over 80 winters, but a single day varies from 7.7 to 19:1 (p10-p90).
    - Temperature alone explains little.
-5. **One data provider: GribStream.** It serves all three models both live and archived, the same data the calibration was fit on (R6).
+5. **One data provider, and Open-Meteo is enough.**
+   - It serves the same three models live and archived, and its blend scores within 0.08 of GribStream's (R6).
+   - It's callable from a browser with no key.
+   - GribStream's extra history (NBM back to 2020, leads past day 7) didn't change any decision.
 
 ## R1. Ground truth
 
@@ -128,7 +131,22 @@ Blend skill, same winters as R4 (base / Berthoud / Fool Creek):
 
 **Show daily amounts for days 1-7, plus totals for days 1-3 and 4-7.** Nothing beyond day 8.
 
-## R6. Live pipeline and cost
+## R6. Data provider: Open-Meteo vs GribStream
+
+The same blend scored on Open-Meteo's archive (same winters; day 1 / 3 / 5 / 7):
+
+| Source | Base | Berthoud | Fool Creek |
+|---|---|---|---|
+| GribStream | 0.72 / 0.56 / 0.39 / 0.26 | 0.72 / 0.55 / 0.34 / 0.24 | 0.65 / 0.54 / 0.33 / 0.24 |
+| Open-Meteo | 0.70 / 0.55 / 0.33 / 0.20 | 0.67 / 0.54 / 0.38 / 0.21 | 0.57 / 0.49 / 0.34 / 0.19 |
+
+- **Open-Meteo scores 0-0.08 lower.** Part of that is its archive's definition of day N, about 12 h further ahead, so it's slightly conservative. Single models go both ways (its IFS beats GribStream's on some days).
+- **What GribStream added beyond Open-Meteo:**
+  - NBM back to 2020: four more winters for one of three blend members.
+  - Lead times past 7 days, which turned out to have no reliable skill.
+- **ICON** (Open-Meteo only) helps day 1 at the upper gauges (Fool Creek blend 0.57 → 0.65) but slightly hurts days 3-5, and its runs end at day 6.5. No consistent gain, so it stays out.
+
+## R7. Live pipeline and cost
 
 **GribStream** serves NBM, IFS and AIFS live, from the same API the calibration was fit on.
 
@@ -154,6 +172,8 @@ Blend skill, same winters as R4 (base / Berthoud / Fool Creek):
 ```sh
 GRIBSTREAM_TOKEN=... python3 research/gribstream.py nbm|ifsoper|aifsoper   # backfill, resumable
 python3 research/skill.py [SINCE]          # R4/R5; R4 table: SINCE=2024-03-01
+OPENMETEO_APIKEY=... python3 research/openmeteo.py   # R6
+python3 research/skill.py 2024-03-01 openmeteo
 ```
 
 Scripts whose job is done live in git history:
