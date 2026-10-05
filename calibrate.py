@@ -1,7 +1,9 @@
 """Fit the calibration the forecast page applies, score it, and write calibration.json.
 
 For each point (base, peak), forecast day 1-7 (24 h ending 08:00 MST) and model (NBM, ECMWF IFS,
-ECMWF AIFS):  liquid = a + b * model liquid.  The forecast is the mean of the three, and
+ECMWF AIFS):  liquid = a * cold + b * cold liquid, where cold liquid is the model's precipitation in
+hours at or below 1 C and cold is the fraction of such hours (light snow the models miss only happens
+when it's cold; rain counts as nothing). The forecast is the mean of the three, and
 snow = liquid * one snow-to-liquid ratio. The low-high range is the 10th-90th percentile of what
 actually fell on past days with a similar forecast.
 Truth: base = Winter Park COOP gauge (liquid and measured snowfall, read 08:00);
@@ -24,6 +26,7 @@ CACHE = HERE / ".cache"
 POINTS = {"base": (39.8877, -105.7613), "peak": (39.8443, -105.7819)}  # COOP gauge; Panoramic Express top
 MODELS = {"nbm": "ncep_nbm_conus", "ifs": "ecmwf_ifs025", "aifs": "ecmwf_aifs025_single"}
 DAYS = range(1, 8)
+SNOW_C = 1.0                            # at or below this 2 m temperature, precipitation counts as snow
 WINTERS = (2023, 2024, 2025)            # Nov-Apr seasons; the archive starts Jan 2024
 BINS = [0.05, 0.2]                      # forecast liquid (in): dry, light, heavy, for the range lookup
 LEADS = {1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 2, 7: 2}   # days 1-2, 3-4, 5-7 share a range table
@@ -46,9 +49,10 @@ def season(d):
 
 
 def forecasts():
-    """{(model, point, n, date): liquid inches forecast n days ahead for the 24 h ending 08:00 MST on date}."""
+    """{(model, point, n, date): (cold fraction, cold liquid inches)} forecast n days ahead for the
+    24 h ending 08:00 MST on date."""
     out = {}
-    hourly = ",".join(f"precipitation_previous_day{n}" for n in DAYS)
+    hourly = ",".join(f"{v}_previous_day{n}" for v in ("precipitation", "temperature_2m") for n in DAYS)
     for model, om in MODELS.items():
         for w in WINTERS:
             url = ("https://customer-previous-runs-api.open-meteo.com/v1/forecast?"
@@ -60,11 +64,12 @@ def forecasts():
                 times = [dt.datetime.fromisoformat(t) for t in loc["hourly"]["time"]]
                 for n in DAYS:
                     acc = collections.defaultdict(list)
-                    for t, v in zip(times, loc["hourly"][f"precipitation_previous_day{n}"]):
-                        if v is not None:                          # hour ending t; 15Z = 08:00 MST
-                            acc[(t - dt.timedelta(hours=15, minutes=1)).date() + DAY].append(v)
-                    out.update({(model, point, n, d): sum(v) / 25.4 for d, v in acc.items()
-                                if len(v) == 24 and season(d) is not None})
+                    for t, p, c in zip(times, loc["hourly"][f"precipitation_previous_day{n}"],
+                                       loc["hourly"][f"temperature_2m_previous_day{n}"]):
+                        if p is not None and c is not None:        # hour ending t; 15Z = 08:00 MST
+                            acc[(t - dt.timedelta(hours=15, minutes=1)).date() + DAY].append((p, c <= SNOW_C))
+                    out.update({(model, point, n, d): (sum(c for _, c in v) / 24, sum(p for p, c in v if c) / 25.4)
+                                for d, v in acc.items() if len(v) == 24 and season(d) is not None})
     return out
 
 
@@ -96,14 +101,15 @@ def fit(fc, obs, point, train):
             pts = [(f, obs[point][d][1]) for (mm, p, nn, d), f in fc.items()
                    if (mm, p, nn) == (m, point, n) and season(d) in train and d in obs[point]]
             if len(pts) >= 30:                              # a model can be missing from early winters
-                xs, ys = zip(*pts)
-                b = st.covariance(xs, ys) / st.variance(xs)
-                coef[(m, n)] = (st.mean(ys) - b * st.mean(xs), b)
+                s11 = sum(c * c for (c, _), _ in pts); s22 = sum(x * x for (_, x), _ in pts)
+                s12 = sum(c * x for (c, x), _ in pts); det = s11 * s22 - s12 * s12
+                s1y = sum(c * y for (c, _), y in pts); s2y = sum(x * y for (_, x), y in pts)
+                coef[(m, n)] = ((s1y * s22 - s2y * s12) / det, (s2y * s11 - s1y * s12) / det)
     members = collections.defaultdict(list)
-    for (m, p, n, d), f in fc.items():
+    for (m, p, n, d), (c, x) in fc.items():
         if p == point and (m, n) in coef:
             a, b = coef[(m, n)]
-            members[(n, d)].append(max(0.0, a + b * f))
+            members[(n, d)].append(max(0.0, a * c + b * x))
     return coef, {k: st.mean(v) for k, v in members.items()}
 
 
@@ -163,7 +169,7 @@ def main():
             scores[point]["snow_skill"] = [round(skill(snow[n]), 2) for n in DAYS]
         print(point, scores[point])
 
-    calibration = {"points": POINTS, "models": MODELS, "bins": BINS, "leads": LEADS, "scores": scores}
+    calibration = {"points": POINTS, "models": MODELS, "snow_c": SNOW_C, "bins": BINS, "leads": LEADS, "scores": scores}
     for point in POINTS:                                    # final fit on every winter
         coef, blend = fit(fc, obs, point, WINTERS)
         calibration.setdefault("coef", {})[point] = {m: [[round(x, 4) for x in coef[(m, n)]] for n in DAYS]

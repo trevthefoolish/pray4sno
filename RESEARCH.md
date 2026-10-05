@@ -147,36 +147,50 @@ The same blend scored on Open-Meteo's archive (same winters; day 1 / 3 / 5 / 7):
 
 **How the forecast is built:**
 - **Days:** 24 h ending 08:00 MST, matching the base gauge and the morning snow report.
-- **Liquid:** for each point × forecast day × model (NBM, IFS, AIFS), liquid = a + b · model liquid. The three are averaged.
-- **Snow:** liquid × 14.7.
+- **Liquid:** for each point × forecast day × model (NBM, IFS, AIFS), liquid = a × cold + b × cold liquid.
+  - *Cold liquid* is the model's precipitation in hours at or below 1 °C, so rain counts as nothing.
+  - *Cold* is the fraction of such hours. Light snow the models miss only happens when it's cold, so a warm dry day forecasts exactly zero.
+  - The three models are averaged.
+- **Snow:** liquid × 15.2.
 - **Low-high range:** the 10th-90th percentile of what actually fell on past days with a similar forecast. That's grouped by days 1-2, 3-4 and 5-7, and by dry / light / heavy (< 0.05", 0.05-0.2", > 0.2" liquid).
+  - The page widens the range if needed so it always contains the number shown.
 
 Out-of-sample scores (each winter scored by a fit on the others), days 1-7:
 
 | | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 |---|---|---|---|---|---|---|---|
-| Base snow skill (vs measured snowfall) | 0.64 | 0.61 | 0.53 | 0.39 | 0.28 | 0.25 | 0.20 |
-| Base liquid skill | 0.70 | 0.64 | 0.55 | 0.43 | 0.31 | 0.26 | 0.19 |
-| Peak liquid skill (vs Berthoud) | 0.67 | 0.64 | 0.55 | 0.42 | 0.38 | 0.26 | 0.20 |
-| Base range holds the outcome | 89% | 88% | 88% | 88% | 90% | 88% | 89% |
-| Peak range holds the outcome | 96% | 95% | 91% | 91% | 94% | 94% | 94% |
+| Base snow skill (vs measured snowfall) | 0.61 | 0.66 | 0.52 | 0.41 | 0.34 | 0.27 | 0.24 |
+| Base liquid skill | 0.66 | 0.66 | 0.52 | 0.42 | 0.34 | 0.25 | 0.20 |
+| Peak liquid skill (vs Berthoud) | 0.67 | 0.65 | 0.54 | 0.42 | 0.39 | 0.26 | 0.21 |
+| Base range holds the outcome | 90% | 90% | 91% | 89% | 91% | 88% | 90% |
+| Peak range holds the outcome | 94% | 93% | 92% | 90% | 94% | 94% | 94% |
 
-**Snow conversion methods tested** (base snow skill, days 1 / 2 / 3):
+**Variants tested** (base snow skill, days 1 / 2 / 3 / 5 / 7):
 
-| Method | Skill |
+| Variant | Skill |
 |---|---|
-| **One fitted ratio, no intercept (kept)** | **0.64 / 0.61 / 0.53** |
-| Ratio varying with forecast temperature | 0.55 / 0.60 / 0.46 |
-| NBM's own snowfall, calibrated | 0.57 / 0.46 / 0.28 |
+| **Cold-scaled intercept + 1 °C rain/snow cutoff (kept)** | **0.61 / 0.66 / 0.52 / 0.34 / 0.24** |
+| a + b × all liquid (first version) | 0.64 / 0.61 / 0.53 / 0.28 / 0.20 |
+| No intercept | 0.64 / 0.60 / 0.53 / 0.26 / 0.18 (and the peak's day 7 fell from 0.20 to 0.11) |
+| 0 °C or 2 °C cutoff | within 0.02 of 1 °C |
+| Ratio varying with daily temperature | 0.55 / 0.60 / 0.46 / ... |
+| NBM's own snowfall, calibrated | 0.57 / 0.46 / 0.28 / ... |
 
-Separate ratios per forecast day scored the same as one (14.0-16.3 vs 14.7).
-
-**Ranges tested:** the spread between the three calibrated models held the outcome only 9-60% of the time, far too narrow.
+- **Why the cutoff:** the first version turned an October rain week into 1-2" of daily "snow" at the peak, because nothing separated rain from snow and the intercept added climatology every day. The cutoff fixes both.
+- **Separate snow ratios per forecast day** scored the same as one.
+- **The spread between the three calibrated models** held the outcome only 9-60% of the time as a range, far too narrow.
 
 **Caveats:**
-- Peak snow can't be scored, because nothing measures snowfall up there. The peak uses the base's ratio, which is likely conservative since the peak is colder.
+- Peak snow can't be scored, because nothing measures snowfall up there. The peak uses the base's ratio, which is likely conservative.
 - Ranges run wider than a strict 80% because many days are exactly zero on both sides.
 - Only two winters of Open-Meteo archive exist; recalibrate each spring.
+
+## Phase 3: the page (`index.html`)
+
+- **One request from the browser** to Open-Meteo's paid API: three models, base and peak, hourly precipitation and temperature.
+- **The page applies `calibration.json` with the same formula,** checked against an independent Python recomputation of the same live data.
+- **It shows** the next-3-days total, then snow and range for each of 7 days at the peak and the base. No libraries, no server.
+- **The API key is in the page source.** Accepted: no overage charges, and the key can be rotated.
 
 ## Gotchas found (fixed in code)
 
