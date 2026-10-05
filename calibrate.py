@@ -10,11 +10,10 @@ Truth: base = Winter Park COOP gauge (liquid and measured snowfall, read 08:00);
        peak = Berthoud Summit SNOTEL liquid (no snowfall is measured up there).
 Scores are leave-one-winter-out: fit on the other winters, score the held-out one.
 
-Usage: OPENMETEO_APIKEY=... python3 calibrate.py
+Usage: OPENMETEO_APIKEY=... python3 calibrate.py   (about a minute; prints the scores)
 """
 import collections
 import datetime as dt
-import hashlib
 import json
 import os
 import pathlib
@@ -22,7 +21,6 @@ import statistics as st
 import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
-CACHE = HERE / ".cache"
 POINTS = {"base": (39.8877, -105.7613), "peak": (39.8443, -105.7819)}  # COOP gauge; Panoramic Express top
 MODELS = {"nbm": "ncep_nbm_conus", "ifs": "ecmwf_ifs025", "aifs": "ecmwf_aifs025_single"}
 DAYS = range(1, 8)
@@ -34,14 +32,8 @@ DAY = dt.timedelta(days=1)
 
 
 def get_json(url):
-    """GET with an on-disk cache (the key is not part of the cache name)."""
-    path = CACHE / "http" / hashlib.sha1(url.split("&apikey=")[0].encode()).hexdigest()
-    if not path.exists():
-        req = urllib.request.Request(url, headers={"User-Agent": "pray4sno"})
-        with urllib.request.urlopen(req, timeout=300) as r:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(r.read())
-    return json.loads(path.read_bytes())
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "pray4sno"}), timeout=300) as r:
+        return json.load(r)
 
 
 def season(d):
@@ -149,8 +141,7 @@ def skill(rows):
 
 def main():
     fc, obs = forecasts(), truth()
-    scores = {}
-    for point in POINTS:
+    for point in POINTS:                                    # out-of-sample scores, printed for RESEARCH.md
         liq, snow, hits = collections.defaultdict(list), collections.defaultdict(list), collections.Counter()
         for w in WINTERS:
             train = [x for x in WINTERS if x != w]
@@ -164,13 +155,11 @@ def main():
                     if s is not None:
                         snow[n].append((d, f * ratio, s))
                     hits[n] += o <= top[(LEADS[n], bin_of(f))] * cold[(n, d)] + 0.005
-        scores[point] = {"liquid_skill": [round(skill(liq[n]), 2) for n in DAYS],
-                         "upto_coverage": [round(hits[n] / len(liq[n]), 2) for n in DAYS]}
-        if snow:
-            scores[point]["snow_skill"] = [round(skill(snow[n]), 2) for n in DAYS]
-        print(point, scores[point])
+        print(point, "liquid skill", [round(skill(liq[n]), 2) for n in DAYS],
+              "| up-to coverage", [round(hits[n] / len(liq[n]), 2) for n in DAYS],
+              *(["| snow skill", [round(skill(snow[n]), 2) for n in DAYS]] if snow else []))
 
-    calibration = {"points": POINTS, "models": MODELS, "snow_c": SNOW_C, "bins": BINS, "leads": LEADS, "scores": scores}
+    calibration = {"points": POINTS, "models": MODELS, "snow_c": SNOW_C, "bins": BINS, "leads": LEADS}
     for point in POINTS:                                    # final fit on every winter
         coef, blend, _ = fit(fc, obs, point, WINTERS)
         calibration.setdefault("coef", {})[point] = {m: [[round(x, 4) for x in coef[(m, n)]] for n in DAYS]
