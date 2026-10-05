@@ -4,8 +4,9 @@ Daily 12Z runs (issued about 5 AM MST), Nov-Apr, every lead time, raw as GribStr
 them; cached per run in .cache/gs/<model>/<run>.csv. Credits = valid times x variables, and
 all four sites count as one. On quota exhaustion (429 with a long Retry-After) it stops;
 rerun after the daily reset to resume. A quota cut can truncate the response it lands in, so
-requests are one run each and the last run saved before a quota stop is discarded. Empty
-runs (not in the archive) cost nothing and are never cached.
+the last batch saved before a quota stop is discarded. Requests carry several runs: the API
+throttles request rate, not size. Empty runs (not in the archive) cost nothing and are never
+cached.
 
 Precipitation comes back differently per model (checked on the 2025-03-15 12Z run):
   nbm            1-h totals to 36 h, then 6-h totals at 42, 48, ...; 3-hourly leads are NaN
@@ -59,9 +60,12 @@ def path(model, run):
     return CACHE / "gs" / model / f"{run:%Y%m%dT%H}.csv"
 
 
-def fetch(model, run):
+BATCH = 10
+
+
+def fetch(model, runs):
     lead, _, variables = MODELS[model]
-    body = {"timesList": [f"{run:%Y-%m-%dT%H}:00:00Z"], "minLeadTime": "0h", "maxLeadTime": lead,
+    body = {"timesList": [f"{r:%Y-%m-%dT%H}:00:00Z" for r in runs], "minLeadTime": "0h", "maxLeadTime": lead,
             "coordinates": [{"lat": a, "lon": b, "name": n} for n, (a, b) in SITES.items()],
             "variables": [{"name": n, "level": lv, "info": i, "alias": a} for n, lv, i, a in variables]}
     req = urllib.request.Request(
@@ -84,27 +88,34 @@ def fetch(model, run):
         except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
             error = repr(e)
             time.sleep(min(300, 2 ** (attempt + 2)))
-        print(f"  retry {attempt + 1} for {run:%Y-%m-%d}: {error}", flush=True)
+        print(f"  retry {attempt + 1} for {runs[0]:%Y-%m-%d}: {error}", flush=True)
     raise RuntimeError(f"GribStream request kept failing: {error}")
 
 
 def main(model, first="2020", last="2025"):
     todo = [r for r in runs(model, int(first), int(last)) if not path(model, r).exists()]
     print(f"{model}: {len(todo)} runs to fetch", flush=True)
-    last_saved = None
-    for i, run in enumerate(todo):
+    saved = []
+    for i in range(0, len(todo), BATCH):
+        batch = todo[i:i + BATCH]
         try:
-            text = fetch(model, run)
+            text = fetch(model, batch)
         except QuotaExhausted as e:
-            if last_saved:
-                last_saved.unlink()
+            for p in saved:
+                p.unlink()
             sys.exit(f"{model}: quota exhausted after {i} runs; resume in {e.args[0] / 3600:.1f} h")
-        if text.count("\n") > 1:
-            last_saved = path(model, run)
-            last_saved.parent.mkdir(parents=True, exist_ok=True)
-            last_saved.write_text(text)
-        if i % 30 == 0:
-            print(f"  {run:%Y-%m-%d}: {text.count(chr(10)) - 1} rows", flush=True)
+        header, *rows = text.splitlines()
+        by_run = {}
+        for row in rows:
+            by_run.setdefault(row.split(",", 1)[0], []).append(row)
+        saved = []
+        for r in batch:
+            got = by_run.get(f"{r:%Y-%m-%dT%H}:00:00Z")
+            if got:
+                saved.append(path(model, r))
+                saved[-1].parent.mkdir(parents=True, exist_ok=True)
+                saved[-1].write_text("\n".join([header] + got) + "\n")
+        print(f"  {batch[0]:%Y-%m-%d}: {len(rows)} rows for {len(batch)} runs", flush=True)
 
 
 if __name__ == "__main__":
