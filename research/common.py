@@ -2,7 +2,9 @@
 import datetime as dt
 import hashlib
 import json
+import os
 import pathlib
+import re
 import time
 import urllib.request
 
@@ -11,6 +13,7 @@ CACHE = ROOT / ".cache"
 
 # Base = the Winter Park COOP gauge (the base truth). Peak = top of Panoramic Express (Parsenn Bowl).
 POINTS = {"base": (39.8877, -105.7613), "peak": (39.8443, -105.7819)}
+SITES = {**POINTS, "berthoud": (39.8036, -105.7779), "foolcreek": (39.8687, -105.8677)}  # + truth gauges
 COOP = "USC00059175"                      # Winter Park, 9,123 ft, read daily at 08:00
 SNOTEL = {"berthoud": "335:CO:SNTL",      # Berthoud Summit, 11,300 ft, on the Divide
           "foolcreek": "1186:CO:SNTL"}    # Fool Creek, 11,130 ft
@@ -18,7 +21,8 @@ SNOTEL = {"berthoud": "335:CO:SNTL",      # Berthoud Summit, 11,300 ft, on the D
 
 def get(url, headers=None, cache=True, tries=4):
     """GET with an on-disk cache keyed by URL + headers."""
-    key = hashlib.sha1((url + json.dumps(headers or {}, sort_keys=True)).encode()).hexdigest()
+    public = re.sub(r"&apikey=[^&]*", "", url)  # cache survives key rotation; keys never hit disk
+    key = hashlib.sha1((public + json.dumps(headers or {}, sort_keys=True)).encode()).hexdigest()
     path = CACHE / "http" / key[:2] / key
     if cache and path.exists():
         return path.read_bytes()
@@ -36,6 +40,13 @@ def get(url, headers=None, cache=True, tries=4):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(body)
     return body
+
+
+def openmeteo(api, query):
+    """Open-Meteo URL; uses the paid customer servers when OPENMETEO_APIKEY is set."""
+    key = os.environ.get("OPENMETEO_APIKEY")
+    host = f"customer-{api}" if key else api
+    return f"https://{host}.open-meteo.com/v1/forecast?{query}" + (f"&apikey={key}" if key else "")
 
 
 def get_json(url):
@@ -70,7 +81,7 @@ def coop_daily(start="1942-01-01", end="2026-09-30"):
 
 
 def snotel_daily(triplet, element, start="1978-10-01", end="2026-09-30"):
-    """{date: value} of a SNOTEL daily element (PREC/WTEQ are midnight readings, inches)."""
+    """{date: value} of a SNOTEL daily element (inches). PREC/WTEQ are the reading at 24:00 of the date."""
     url = ("https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data?"
            f"stationTriplets={triplet}&elements={element}&duration=DAILY&beginDate={start}&endDate={end}")
     vals = get_json(url)[0]["data"][0]["values"]

@@ -6,7 +6,7 @@ leads:  Previous Runs API (`*_previous_dayN`, N=1..7), winters 2024-26.
         Daily 08:00-08:00 liquid vs the COOP gauge (base) and 00:00-00:00 vs SNOTEL (upper):
         bias ratio, MAE raw, MAE after a ratio fitted on the other winter.
 
-The free API is rate-limited per IP; responses are cached in .cache/ so reruns cost nothing.
+Set OPENMETEO_APIKEY to use the paid servers. Responses are cached in .cache/.
 Usage: python3 research/openmeteo.py [asis|leads]
 """
 import collections
@@ -14,9 +14,9 @@ import datetime as dt
 import statistics as st
 import sys
 
-from common import SNOTEL, coop_daily, get_json, season, snotel_daily
+from common import SITES, SNOTEL, coop_daily, get_json, openmeteo, season, snotel_daily
 
-GAUGES = {"base": (39.8877, -105.7613), "berthoud": (39.8036, -105.7779), "foolcreek": (39.8687, -105.8677)}
+GAUGES = {k: SITES[k] for k in ("base", "berthoud", "foolcreek")}
 MODELS = ["ncep_nbm_conus", "ecmwf_ifs025", "ecmwf_aifs025_single", "gfs_seamless",
           "ncep_hrrr_conus", "icon_seamless", "gem_seamless"]
 WINTERS = {"asis": (2021, 2025), "leads": (2024, 2025)}
@@ -25,9 +25,8 @@ DAY = dt.timedelta(days=1)
 
 def hourly(api, model, gauge, variables, first, last):
     lat, lon = GAUGES[gauge]
-    url = (f"https://{api}.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
-           f"&hourly={','.join(variables)}&models={model}&timezone=America/Denver"
-           f"&start_date={first}-11-01&end_date={last + 1}-04-30")
+    url = openmeteo(api, f"latitude={lat}&longitude={lon}&hourly={','.join(variables)}&models={model}"
+                         f"&timezone=America/Denver&start_date={first}-11-01&end_date={last + 1}-04-30")
     h = get_json(url)["hourly"]
     times = [dt.datetime.fromisoformat(t) for t in h["time"]]
     return {v: dict(zip(times, h[v])) for v in variables}
@@ -49,7 +48,10 @@ def truths():
     out = {"base": ({d: v[1] for d, v in coop.items()}, 8), "base_snow": ({d: v[0] for d, v in coop.items()}, 8)}
     for k, t in SNOTEL.items():
         p = snotel_daily(t, "PREC", "2021-10-01", "2026-06-30")
-        out[k] = ({d + DAY: p[d + DAY] - p[d] for d in p if d + DAY in p}, 0)  # day D = 24 h ending 00:00 on D
+        # NRCS dates each daily reading by the day it closes (24:00), so the window ending 00:00 on
+        # D+1 is reading(D) - reading(D-1). Checked: this alignment correlates 0.78 with NBM day 1,
+        # the next-best shift 0.15.
+        out[k] = ({d + DAY: p[d] - p[d - DAY] for d in p if d - DAY in p}, 0)
     return out
 
 
@@ -75,7 +77,7 @@ def asis():
                 if gauge == "base":
                     sd = [d for d in days if d in obs["base_snow"][0] and d in snow]
                     fs, os_ = sum(snow[d] for d in sd), sum(obs["base_snow"][0][d] for d in sd)
-                    line += f" | {fs:8.0f}  {os_:8.0f}  {os_ / fs:7.2f}x"
+                    line += f" | {fs:8.0f}  {os_:8.0f}  " + (f"{os_ / fs:7.2f}x" if fs else "  (no snowfall field)")
                 print(line)
 
 
