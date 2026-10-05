@@ -1,6 +1,7 @@
-"""R4/R5 over six winters: each archived model's skill by lead day, and how far ahead is useful.
+"""R4/R5: each model's skill by forecast day, and how far ahead the blend is useful.
 
-Forecast day N of a 12Z run is the 24 h ending 12Z (05:00 MST) N days later.
+Data: research/openmeteo.py (Open-Meteo Previous Runs, from 2024). Forecast day N = the 24 h ending
+12Z (05:00 MST) N days after the run date.
 Truth: base = COOP day (24 h ending 08:00 MST, 3 h after the forecast day ends);
        upper gauges = SNOTEL hourly liquid over exactly the forecast day.
 
@@ -9,72 +10,28 @@ Scores per model x site x lead, leave-one-winter-out (fit on the other winters, 
   r      correlation
   skill  1 - SSE / SSE(climatology), forecast calibrated as a + b*f;
          climatology = the site's mean for that calendar month. > 0 beats climatology.
-Also for multi-day totals, and for an equal-weight blend of the calibrated models.
+Also for multi-day totals, and for the equal-weight blend of the calibrated models.
 
-Usage: python3 research/skill.py [SINCE_DATE] [gribstream|openmeteo]   (after the matching fetch script)
+Usage: python3 research/skill.py [SINCE_DATE]
 """
 import collections
-import csv
 import datetime as dt
 import json
 import statistics as st
 
 from common import CACHE, SNOTEL, coop_daily, season, snotel_hourly
 
-SOURCES = {  # models per data source, and the equal-weight blends of their calibrated forecasts
-    "gribstream": (["nbm", "ifsoper", "aifsoper"], {"blend": ["nbm", "ifsoper", "aifsoper"]}),
-    "openmeteo": (["om_nbm", "om_ifs", "om_aifs", "om_icon", "om_gem"],
-                  {"blend": ["om_nbm", "om_ifs", "om_aifs"], "blend+icon": ["om_nbm", "om_ifs", "om_aifs", "om_icon"]}),
-}
-SITES = ["base", "berthoud", "foolcreek"]
+MODELS = ["nbm", "ifs", "aifs"]
 SPANS = {"1": (1, 1), "2": (2, 2), "3": (3, 3), "4": (4, 4), "5": (5, 5), "6": (6, 6), "7": (7, 7),
-         "8": (8, 8), "10": (10, 10), "12": (12, 12), "14": (14, 14),
-         "1-3": (1, 3), "4-7": (4, 7), "8-14": (8, 14)}
+         "1-3": (1, 3), "4-7": (4, 7)}
 DAY = dt.timedelta(days=1)
 
 
-def intervals(model, values):
-    """[(end_hour, hours, mm)] from one run's raw values {lead_h: value} (see gribstream.py)."""
-    out = []
-    if model in ("ifsoper", "aifsoper"):              # running totals
-        scale = 1000 if model == "ifsoper" else 1
-        prev_t, prev_v = 0, 0.0
-        for t in sorted(values):
-            if t > 0:
-                out.append((t, t - prev_t, max(0.0, values[t] - prev_v) * scale))
-                prev_t, prev_v = t, values[t]
-    for t, v in values.items():
-        if model == "nbm" and 1 <= t <= 36:
-            out.append((t, 1, v))
-        elif model == "nbm" and t > 36 and t % 6 == 0:
-            out.append((t, 6, v))
-    return out
-
-
 def load(model):
-    """{(run_date, site): {lead_day: inches}} for complete 24 h windows."""
-    if model.startswith("om_"):                      # written by openmeteo.py
-        raw = json.loads((CACHE / "om" / f"{model}.json").read_text())
-        return {(dt.date.fromisoformat(k.split("|")[0]), k.split("|")[1]): {int(n): v for n, v in d.items()}
-                for k, d in raw.items()}
-    out = {}
-    for path in sorted((CACHE / "gs" / model).glob("*.csv")):
-        run = dt.datetime.strptime(path.stem, "%Y%m%dT%H")
-        raw = collections.defaultdict(dict)
-        with path.open() as f:
-            for row in csv.DictReader(f):
-                if row["apcp"] not in ("", "NaN") and float(row["apcp"]) < 1000:   # NOAA missing = 9.999e20
-                    t = round((dt.datetime.fromisoformat(row["forecasted_time"][:19]) - run).total_seconds() / 3600)
-                    raw[row["name"]][t] = float(row["apcp"])
-        for site, values in raw.items():
-            days = collections.defaultdict(lambda: [0, 0.0])
-            for t, hours, mm in intervals(model, values):
-                n = (t - hours) // 24 + 1                  # keep intervals that don't straddle days
-                if (t - 1) // 24 + 1 == n:
-                    days[n][0] += hours
-                    days[n][1] += mm
-            out[(run.date(), site)] = {n: mm / 25.4 for n, (h, mm) in days.items() if h == 24}
-    return out
+    """{(run_date, site): {lead_day: inches}}, as written by openmeteo.py."""
+    raw = json.loads((CACHE / "om" / f"{model}.json").read_text())
+    return {(dt.date.fromisoformat(k.split("|")[0]), k.split("|")[1]): {int(n): v for n, v in d.items()}
+            for k, d in raw.items()}
 
 
 def truth(first, last):
@@ -130,15 +87,14 @@ def skill(cal):
     return 1 - sse / sse_clim
 
 
-def main(since="2020-01-01", source="gribstream"):
-    """since: score only runs from this date, so models with different archives compare fairly."""
+def main(since="2023-11-01"):
+    """since: score only runs from this date (e.g. 2025-02-25 to compare on AIFS's shorter archive)."""
     since = dt.date.fromisoformat(since)
-    MODELS, BLENDS = SOURCES[source]
     data = {m: {k: v for k, v in load(m).items() if k[0] >= since} for m in MODELS}
-    obs = truth(2020, 2025)
-    for site in SITES:
+    obs = truth(2023, 2025)
+    for site in ("base", "berthoud", "foolcreek"):
         print(f"\n== {site}: skill vs climatology [correlation] by forecast day; > 0 beats climatology")
-        print(f"{'':14}" + "".join(f"{k:>12}" for k in SPANS))
+        print(f"{'':10}" + "".join(f"{k:>12}" for k in SPANS))
         cals = {}
         for m in MODELS:
             cells = []
@@ -147,16 +103,15 @@ def main(since="2020-01-01", source="gribstream"):
                 cal = cals[(m, k)] = calibrate(ps)
                 r = st.correlation([p[1] for p in ps], [p[2] for p in ps]) if cal else 0
                 cells.append(f"{skill(cal):+.2f} [{r:.2f}]" if cal else "")
-            print(f"{m:14}" + "".join(f"{c:>12}" for c in cells))
-        for name, models in BLENDS.items():
-            cells = []
-            for k in SPANS:
-                members = [cals[(m, k)] for m in models if cals.get((m, k))]
-                dates = set().union(*members) if members else set()
-                blend = {d: (st.mean(c[d][0] for c in members if d in c), next(c[d][1] for c in members if d in c))
-                         for d in dates}
-                cells.append(f"{skill(blend):+.2f}" if blend else "")
-            print(f"{name:14}" + "".join(f"{c:>12}" for c in cells))
+            print(f"{m:10}" + "".join(f"{c:>12}" for c in cells))
+        cells = []
+        for k in SPANS:
+            members = [cals[(m, k)] for m in MODELS if cals[(m, k)]]
+            dates = set().union(*members) if members else set()
+            blend = {d: (st.mean(c[d][0] for c in members if d in c), next(c[d][1] for c in members if d in c))
+                     for d in dates}
+            cells.append(f"{skill(blend):+.2f}" if blend else "")
+        print(f"{'blend':10}" + "".join(f"{c:>12}" for c in cells))
         bias = {m: [sum(p[2] for p in pairs(data[m], obs[site], site, n, n)) /
                     max(1e-9, sum(p[1] for p in pairs(data[m], obs[site], site, n, n))) for n in (1, 3, 7)]
                 for m in MODELS}

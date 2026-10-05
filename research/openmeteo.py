@@ -5,7 +5,7 @@ Day N of the 12Z run on date R = the 24 h ending 12Z on R+N, summed from `precip
 (each hour as forecast N x 24 h before it). Leads run about 12 h longer than a single run's day N,
 so these scores are slightly conservative next to run-based archives.
 
-Usage: OPENMETEO_APIKEY=... python3 research/openmeteo.py
+Usage: python3 research/openmeteo.py   (free API; set OPENMETEO_APIKEY to use a paid key)
 """
 import collections
 import datetime as dt
@@ -14,8 +14,7 @@ import os
 
 from common import CACHE, SITES, get_json
 
-MODELS = {"om_nbm": "ncep_nbm_conus", "om_ifs": "ecmwf_ifs025", "om_aifs": "ecmwf_aifs025_single",
-          "om_icon": "icon_seamless", "om_gem": "gem_seamless"}
+MODELS = {"nbm": "ncep_nbm_conus", "ifs": "ecmwf_ifs025", "aifs": "ecmwf_aifs025_single"}
 DAYS = range(1, 8)
 
 

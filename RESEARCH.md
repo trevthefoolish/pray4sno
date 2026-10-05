@@ -60,8 +60,8 @@ Phase 1 is complete. Every number below comes from a script; see [Reproduce](#re
 
 | Source | What it has | Used |
 |---|---|---|
-| GribStream `/runs` | NBM 2020-, GFS 2021-, IFS 0.25° 2024-, AIFS 2025- at every lead, point queries | **Yes:** 6 winters, 2,700 runs |
-| Open-Meteo Previous Runs / Single Runs | 7 models from 2024 (≤ 7 days); IFS 9 km hindcasts from Mar 2024 | Early tests only |
+| GribStream `/runs` (paid) | NBM 2020-, GFS 2021-, IFS 0.25° 2024-, AIFS 2025- at every lead, point queries | **Model selection** (R4): 6 winters, 2,700 runs. Dropped after R6 |
+| Open-Meteo Previous Runs (free) | 7 models from 2024, days 1-7 | **The source going forward** (R6) |
 | AWS NBM GRIB2 | NBM 2020- | Cross-check only: matches GribStream; 145 s CPU per run |
 
 **How each model's precipitation comes back** (all checked against the data):
@@ -170,10 +170,8 @@ The same blend scored on Open-Meteo's archive (same winters; day 1 / 3 / 5 / 7):
 ## Reproduce
 
 ```sh
-GRIBSTREAM_TOKEN=... python3 research/gribstream.py nbm|ifsoper|aifsoper   # backfill, resumable
-python3 research/skill.py [SINCE]          # R4/R5; R4 table: SINCE=2024-03-01
-OPENMETEO_APIKEY=... python3 research/openmeteo.py   # R6
-python3 research/skill.py 2024-03-01 openmeteo
+python3 research/openmeteo.py              # Open-Meteo archive (free API; OPENMETEO_APIKEY optional)
+python3 research/skill.py 2024-03-01       # R5 and the Open-Meteo rows of R6
 ```
 
 Scripts whose job is done live in git history:
@@ -181,8 +179,9 @@ Scripts whose job is done live in git history:
 | Commit | Script | What it produced |
 |---|---|---|
 | `f9be182` | `truth.py` | R1, R2 |
-| `f9be182` | `openmeteo.py` | as-is bias, early lead tests |
+| `f9be182` | `openmeteo.py` (old) | as-is bias, early lead tests |
 | `f9be182` | `nbm.py` | raw AWS cross-check |
+| `ff7801a` | `gribstream.py`, `skill.py` (GribStream source) | the R4 table and the GribStream rows of R6 |
 | `2d70f95` | `ifs9.py`, GFS decoding | dropped candidates |
 
 Downloads are cached in `.cache/` (gitignored). API keys come from the environment and never reach disk.
