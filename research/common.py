@@ -86,3 +86,12 @@ def snotel_daily(triplet, element, start="1978-10-01", end="2026-09-30"):
            f"stationTriplets={triplet}&elements={element}&duration=DAILY&beginDate={start}&endDate={end}")
     vals = get_json(url)[0]["data"][0]["values"]
     return {dt.date.fromisoformat(v["date"][:10]): v["value"] for v in vals if v.get("value") is not None}
+
+
+def snotel_hourly(triplet, element, start, end):
+    """{datetime: value} of a SNOTEL hourly element; timestamps are local standard time (UTC-7)."""
+    url = ("https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data?"
+           f"stationTriplets={triplet}&elements={element}&duration=HOURLY"
+           f"&beginDate={start}%2000:00&endDate={end}%2023:00")
+    vals = get_json(url)[0]["data"][0]["values"]
+    return {dt.datetime.fromisoformat(v["date"]): v["value"] for v in vals if v.get("value") is not None}
