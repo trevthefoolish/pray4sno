@@ -1,8 +1,8 @@
 # Research: forecasting snow at Winter Park
 
-**Phase 1 status:** ground truth and snow ratio are done. Skill by lead day is done for days 1-7 over two winters (Open-Meteo). Six-winter, day 1-16 skill is waiting on GribStream quota (see [Decisions](#decisions-needed)).
+**Phase 1 status:** ground truth and snow ratio are done. Skill by lead day is done for days 1-7 over two winters (Open-Meteo). Six-winter, day 1-16 skill is being backfilled from GribStream (Pro 16x).
 
-Every number here comes from a script in `research/`; see [Reproduce](#reproduce). "Liquid" means water equivalent. Windows are 24 h. Seasons run Nov-Apr and are named by their starting year.
+Every number here comes from a script; see [Reproduce](#reproduce). "Liquid" means water equivalent. Windows are 24 h. Seasons run Nov-Apr and are named by their starting year.
 
 ## Bottom line so far
 
@@ -152,30 +152,29 @@ Daily liquid. Base windows end 08:00 (COOP); upper windows end 00:00 (SNOTEL).
 - **NRCS dates each daily SNOTEL reading by the day it closes (24:00).** Misaligning by one day dropped the day-1 correlation from 0.78 to 0.15.
 - **A GribStream quota cut truncates the response it lands in,** while still returning HTTP 200. Requests are now one run each, and the last run before a quota stop is discarded.
 - **Open-Meteo's `gfs_seamless` short-range archive is HRRR.**
+- **GribStream returns GFS as 6-hour buckets through 2024 but as running totals in 2025-26.** The format is detected per run.
 - **NBM hourly totals are rounded to 0.01".** That's fine for calibration, since its bias is lead-specific.
 
 ## Decisions needed
 
 1. **Merge `record.py` and `.github/workflows/record.yml` to `main`.** Scheduled workflows only run from the default branch. Until it runs, no resort data is being saved.
-2. **GribStream tier for the backfill** (about 585k credits):
-
-| Plan | Credits/day | Time to finish | Price |
-|---|---|---|---|
-| Free | about 10k | about 2 months | $0 |
-| Pro | 48k | about 12 days | $9.90/mo |
-| Pro 2x | 96k | about 6 days | $18.80/mo |
-| **Pro 8x** | 384k | **about 2 days** | **$67.80/mo** |
-
-   **Recommended:** Pro 8x for one month, then drop to the tier the live pipeline needs. Ensemble members (GEFS 31, ECMWF 51) multiply credits per member, so they're excluded until the deterministic backtest shows where they'd help.
+2. **Spend.** GribStream Pro 16x ($128.80/mo) covers the whole backfill (about 585k credits) in one day; downgrade once it finishes. After the backtest, keep one data provider and cancel the other. Ensemble members (GEFS 31, ECMWF 51) multiply credits per member, so they're excluded until the deterministic backtest shows where they'd help.
 
 ## Reproduce
 
+Current scripts:
+
 ```sh
-python3 research/truth.py                       # R1, R2 (NCEI is slow: ~20 min first run)
-OPENMETEO_APIKEY=... python3 research/openmeteo.py asis
-OPENMETEO_APIKEY=... python3 research/openmeteo.py leads
-GRIBSTREAM_TOKEN=... python3 research/gribstream.py nbm 2020 2025   # resumable
-python3 research/nbm.py 2025-01-01T12           # raw AWS cross-check (needs `pip install eccodes`)
+GRIBSTREAM_TOKEN=... python3 research/gribstream.py MODEL 2020 2025   # backfill, resumable
+python3 research/skill.py                                            # R4, R5 over six winters
 ```
+
+Scripts whose job is done were removed; they live in commit `f9be182`:
+
+| Script | What it produced | How to run it |
+|---|---|---|
+| `truth.py` | R1, R2 | `python3 research/truth.py` (NCEI is slow: about 20 min the first time) |
+| `openmeteo.py` | R4a, R4b | `OPENMETEO_APIKEY=... python3 research/openmeteo.py asis` (or `leads`) |
+| `nbm.py` | the raw AWS cross-check | `python3 research/nbm.py 2025-01-01T12` (needs `pip install eccodes`) |
 
 All downloads are cached in `.cache/` (gitignored). API keys come from the environment and never reach disk.

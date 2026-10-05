@@ -68,7 +68,7 @@ def fetch(model, run):
         f"https://gribstream.com/api/v2/{model}/runs", data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {os.environ['GRIBSTREAM_TOKEN']}", "Content-Type": "application/json",
                  "Accept": "text/csv", "Accept-Encoding": "gzip"})
-    for attempt in range(6):
+    for attempt in range(10):
         try:
             with urllib.request.urlopen(req, timeout=900) as r:
                 data = r.read()
@@ -79,10 +79,13 @@ def fetch(model, run):
                 raise
             if e.code == 429 and wait > 600:
                 raise QuotaExhausted(wait)
-            time.sleep(max(wait, 2 ** (attempt + 2)))
-        except (urllib.error.URLError, TimeoutError):
-            time.sleep(2 ** (attempt + 2))
-    raise RuntimeError("GribStream request kept failing")
+            error = f"HTTP {e.code}"
+            time.sleep(max(wait, min(300, 2 ** (attempt + 2))))
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            error = repr(e)
+            time.sleep(min(300, 2 ** (attempt + 2)))
+        print(f"  retry {attempt + 1} for {run:%Y-%m-%d}: {error}", flush=True)
+    raise RuntimeError(f"GribStream request kept failing: {error}")
 
 
 def main(model, first="2020", last="2025"):
