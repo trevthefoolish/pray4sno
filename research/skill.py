@@ -20,7 +20,7 @@ import statistics as st
 
 from common import CACHE, SNOTEL, coop_daily, season, snotel_hourly
 
-MODELS = ["nbm", "gefsatmosmean", "gfs", "hrrr", "ifsoper", "aifsoper"]
+MODELS = ["nbm", "gefsatmosmean", "gfs", "ifsoper", "ifs9", "aifsoper"]
 SITES = ["base", "berthoud", "foolcreek"]
 SPANS = {"1": (1, 1), "2": (2, 2), "3": (3, 3), "4": (4, 4), "5": (5, 5), "6": (6, 6), "7": (7, 7),
          "8": (8, 8), "10": (10, 10), "12": (12, 12), "14": (14, 14),
@@ -42,7 +42,7 @@ def intervals(model, values):
                 out.append((t, t - prev_t, (values[t] - prev_v) * scale))
                 prev_t, prev_v = t, values[t]
     for t, v in values.items():
-        if model == "hrrr" and t >= 1 or model == "nbm" and 1 <= t <= 36:
+        if model in ("hrrr", "ifs9") and t >= 1 or model == "nbm" and 1 <= t <= 36:
             out.append((t, 1, v))
         elif model in ("nbm", "gefsatmosmean", "gfs") and not running and t % 6 == 0 and (model != "nbm" or t > 36):
             out.append((t, 6, v))
