@@ -1,180 +1,168 @@
 # Research: forecasting snow at Winter Park
 
-**Phase 1 status:** ground truth and snow ratio are done. Skill by lead day is done for days 1-7 over two winters (Open-Meteo). Six-winter, day 1-16 skill is being backfilled from GribStream (Pro 16x).
+Phase 1 is complete. Every number below comes from a script; see [Reproduce](#reproduce).
 
-Every number here comes from a script; see [Reproduce](#reproduce). "Liquid" means water equivalent. Windows are 24 h. Seasons run Nov-Apr and are named by their starting year.
+**Conventions:**
+- "Liquid" means water equivalent.
+- A forecast day is the 24 h ending 12Z (5 AM MST).
+- Seasons run Nov-Apr and are named by their starting year.
+- **Skill** = 1 − (squared error ÷ squared error of the monthly average), out of sample. 0 means no better than climatology; 1 means perfect.
 
-## Bottom line so far
+## Answers
 
-1. **There is good truth at the base and decent truth up high. The resort's own numbers have to be recorded from now on.**
-   - The base gauge has 80 complete winters, read daily at 08:00.
-   - Two SNOTEL gauges at about 11,200 ft have hourly liquid since 1978 and 2011.
-   - No archive of the resort's Base / Mid / Summit report exists; `record.py` starts one.
-2. **Raw model output is badly wrong here, and wrong differently per model, per elevation and per lead day.**
-   - Every model's liquid is roughly right at the base but 1.3-2x too low at 11,300 ft. The models flatten the mountain.
-   - Open-Meteo's `snowfall` field adds another 1.5-11x error on top of that.
-   - Calibration has to be per point × model × lead.
-3. **No single model wins.**
-   - NBM is the best on day 1 (correlation 0.78-0.79).
-   - ECMWF IFS keeps skill longest (0.69-0.75 at day 3 vs NBM's 0.55-0.61).
-   - By day 7 every model is down to 0.2-0.35.
-   - That favors a lead-dependent blend over any one model.
-4. **Snow ratio is the second big lever.**
-   - The base averages 13.6:1 over 80 winters.
-   - A single day varies from 7.7 to 19:1 (p10-p90).
-   - Temperature alone explains little (r = -0.23). Studies find machine-learning ratio methods roughly halve the error of operational ones.
+1. **Use a calibrated, equal-weight blend of NBM, ECMWF IFS and ECMWF AIFS.**
+   - It beats every single model on days 1-2 at all three sites (skill 0.65-0.72 vs 0.62-0.67 for the best single model) and ties them on days 3-7.
+   - GFS and IFS at 9 km add nothing to the blend. GEFS, HRRR and GEM tested weaker. ICON is the one untested blend candidate (R4).
+2. **Calibration is not optional.**
+   - Raw model liquid is about right at the base but **1.3-2x too low** at 11,200 ft. The bias differs by model and by lead day.
+   - Open-Meteo's `snowfall` field adds another 1.5-11x error (a fixed 7:1 ratio; NBM is the exception).
+3. **Forecast days 1-7.**
+   - Day 8 is marginal.
+   - Day 10 and beyond show no reliable skill. The days 8-14 total flips between "some skill" and none depending on which winters are scored.
+   - Multi-day totals for days 1-3 and 4-7 hold up well (R5).
+4. **Snow-to-liquid ratio is the next big lever.**
+   - The base's median is 13.6:1 over 80 winters, but a single day varies from 7.7 to 19:1 (p10-p90).
+   - Temperature alone explains little.
+5. **One data provider: GribStream.** It serves all three models both live and archived, the same data the calibration was fit on (R6).
 
 ## R1. Ground truth
 
-| Site | Elevation | Measures | Record | Use |
-|---|---|---|---|---|
-| Winter Park COOP `USC00059175` | 9,123 ft | snowfall + liquid, daily, read **08:00** | 1942-2026; 80 of 85 Nov-Apr seasons ≥ 90% complete | **Base truth** |
-| Berthoud Summit SNOTEL 335 | 11,300 ft | liquid hourly, depth, temp | liquid 1978-, depth 2002- | Upper truth (on the Divide) |
-| Fool Creek SNOTEL 1186 | 11,130 ft | liquid hourly, depth, temp | 2011- | Upper truth (drier) |
-| Resort feed (`mtnpowder.com/feed?resortId=5`) | Village / Mid-Mountain / Summit | reported snowfall, 7 stations, resort forecast | **current values only** | Recorded hourly from Oct 2026 by `record.py` |
-
-- **Observation time:** 08:00 on 3,922 of 3,923 days since 2016 (GHCN attributes). So the base day ends at 8 AM.
-- **The upper gauges get much more liquid than the base** (Nov-Apr):
-  - Berthoud Summit: **1.72x** (median of 47 seasons, p10-p90 1.52-2.17)
-  - Fool Creek: **1.36x** (15 seasons, 1.18-1.78)
-  - Berthoud gets 1.22-1.56x Fool Creek **every** winter at nearly the same elevation, so exposure on the Divide matters as much as height.
-  - For comparison, the resort's reported mid-mountain season totals ran 1.27-1.43x the COOP (2024-25, 2025-26).
-- **No gauge exists at the peak** (Panoramic Express, about 12,000 ft). SNOTEL depth gain per inch of liquid is 8.3:1 at Berthoud and 10.0:1 at Fool Creek. That's a floor, not the ratio, because new snow settles while it falls.
-- **Caveats:**
-  - The COOP's unshielded 8" gauge undercatches snow, by up to about 70% at 6-7 m/s wind (Yang 1998). That inflates its measured ratio.
-  - SNOTEL Alter-shielded gauges catch about 70% at 2-4 m/s (Fassnacht 2004).
-  - Resort reports are not independent measurements, and published resort averages conflict (322-345").
-- **Peak truth (recommendation):** calibrate the peak to Berthoud Summit liquid times the snow ratio. Berthoud is on the Divide, like Parsenn and the Cirque. Then check it, and replace it where better, against the resort's Summit-zone reports as `record.py` accumulates them.
-
-## R2. Snow-to-liquid ratio (base, measured snowfall ÷ gauge liquid)
-
-**Season ratio, all 80 winters:** median **13.6**, p10-p90 11.6-16.3.
-
-| Decade | Median |
-|---|---|
-| 1940s | 14.8 |
-| 1950s | 15.2 |
-| 1960s | 14.1 |
-| 1970s | 13.1 |
-| 1980s | 15.7 |
-| 1990s | 12.9 |
-| 2000s | 12.2 |
-| 2010s | 13.2 |
-| 2020s | 14.6 |
-
-- **The last 6 winters were 14.1-15.2.** The drift between decades looks like observer practice, so calibrate on recent winters.
-- **A single storm day (≥ 0.2" liquid)** has median 12.5, p10-p90 7.7-19.0 (n = 2,214).
-- **By month:** Nov 12.5, Dec 13.6, **Jan 13.9**, Feb 13.3, Mar 12.0, Apr 10.2.
-- **Temperature explains little.** Against Berthoud's mean temperature the day before: 0s °F 12.5, 10s 13.1, 20s 11.3, 30s 10.3; r = -0.23.
-- **Literature:**
-  - Rockies modal ratio is about 15 (Baxter 2005).
-  - Alta's median is 13.3 (Alcott & Steenburgh 2010).
-  - Random-forest ratio methods reach MAE 2.9-3.7 vs 4-9 for operational methods (Veals 2025; Pletcher 2024).
-  - NBM blends four methods (MaxTAloft, Cobb, Roebber, 850-700 mb thickness).
-
-## R4a. Models as-is (Open-Meteo, stitched first hours of each run)
-
-Ratios are measured ÷ forecast; above 1 means the model is too low.
-
-| Model | Base liquid | Base `snowfall` field | Berthoud liquid | Fool Creek liquid | Winters |
-|---|---|---|---|---|---|
-| NBM | 0.88-1.13x | **0.88-1.00x** (NBM's own ratio, about 16:1) | 1.33-1.57x | 1.27-1.54x | 2024-26 |
-| ECMWF IFS 0.25° | 0.71-0.97x | 1.47x | 1.76-1.84x | 1.42-1.48x | 2024-26 |
-| ECMWF AIFS | 1.01x | 2.24x | 1.78x | 1.44x | 2025-26 |
-| ICON | 0.89-1.01x | 2.8-6.3x | 1.38-1.49x | 0.94-1.47x | 2022-26 |
-| GEM | 0.74-0.94x | 2.1-2.4x | 1.54-1.86x | 0.97-1.06x | 2023-26 |
-| HRRR (= "GFS seamless", first hours) | **2.4-3.9x** | **6.7-11.4x** | 2.2-2.9x | 1.9-2.9x | 2021-26 |
-
-- Open-Meteo's `snowfall` assumes **7:1** ("divide by 7"; NBM is the exception).
-- In the US, Open-Meteo's `gfs_seamless` uses HRRR for the first hours. Its stitched archive is therefore HRRR, and it matches `ncep_hrrr_conus` exactly.
-- **Correction to the planning notes:** the "GFS 6-11x too low" figure was really **HRRR**. The raw GFS archive (GribStream) will measure GFS separately.
-
-## R4b. Skill by lead day (Open-Meteo Previous Runs, winters 2024-25 and 2025-26)
-
-Daily liquid. Base windows end 08:00 (COOP); upper windows end 00:00 (SNOTEL).
-
-**Correlation, base / Berthoud:**
-
-| Model | Day 1 | Day 3 | Day 5 | Day 7 |
-|---|---|---|---|---|
-| NBM | **0.78** / **0.78** | 0.57 / 0.55 | 0.43 / 0.42 | 0.35 / **0.34** |
-| ECMWF IFS | **0.78** / 0.73 | **0.71** / **0.69** | **0.55** / 0.48 | 0.30 / 0.32 |
-| ICON | 0.70 / 0.75 | 0.57 / 0.68 | 0.40 / **0.51** | — |
-| GEM | 0.74 / 0.59 | 0.62 / 0.44 | 0.31 / 0.28 | 0.22 / 0.18 |
-| GFS seamless | 0.69 / 0.71 | 0.50 / 0.53 | 0.33 / 0.49 | 0.20 / 0.23 |
-
-**Bias (measured ÷ forecast) at Berthoud:**
-
-| Model | Day 1 | Day 3 | Day 7 |
+| Site | Elevation | Measures | Record |
 |---|---|---|---|
-| NBM | 1.41x | 0.97x | 0.89x |
-| ECMWF | 1.96x | 2.01x | 1.68x |
-| GEM | 1.75x | 2.04x | 1.92x |
+| Winter Park COOP `USC00059175` (**base truth**) | 9,123 ft | snowfall + liquid, read daily at **08:00** | 1942-2026; 80 complete Nov-Apr seasons |
+| Berthoud Summit SNOTEL 335 (upper truth, on the Divide) | 11,300 ft | liquid hourly, depth, temp | liquid since 1978 |
+| Fool Creek SNOTEL 1186 (upper truth, drier) | 11,130 ft | liquid hourly, depth, temp | since 2011 |
+| Resort feed `mtnpowder.com/feed?resortId=5` | Village / Mid / Summit | reported snowfall, 7 stations, the resort's forecast | current values only; `record.py` starts the archive |
 
-- **NBM's precipitation shrinks with lead.** At the base its bias goes 0.95x at day 1 → 0.64x at day 3, so it puts down more precipitation at longer leads than actually falls. Bias depends on lead, so calibration must too.
-- **GFS-seamless bias grows with lead** at the upper gauges (1.2x → 4.6x by day 7).
-- **Method lesson:** a single ratio that fixes the season total often *raises* daily MAE, because MAE rewards forecasting too little on a skewed variable. Phase 2 must score bias and a proper probabilistic score (CRPS), not MAE alone.
+- **Upper gauges vs base liquid:**
+  - Berthoud **1.72x** (median of 47 seasons, p10-p90 1.52-2.17)
+  - Fool Creek **1.36x** (15 seasons, 1.18-1.78)
+  - Berthoud beats Fool Creek every winter (1.22-1.56x) at almost the same elevation, so exposure matters as much as height.
+- **No gauge at the peak** (Panoramic Express, about 12,000 ft). Calibrate the peak to Berthoud, which sits on the Divide like Parsenn and the Cirque. Then check it against the resort's Summit reports once recorded.
+- **Caveats:**
+  - Both gauge types undercatch snow in wind: the COOP's unshielded 8" gauge by up to about 70% (Yang 1998), SNOTEL by about 30% at 2-4 m/s (Fassnacht 2004).
+  - Resort reports are not independent measurements.
 
-## R3. Archives of past forecasts, and cost
+## R2. Snow-to-liquid ratio (base: measured snowfall ÷ gauge liquid)
 
-| Source | Models | Back to | Lead | Cost | Verdict |
-|---|---|---|---|---|---|
-| Open-Meteo Previous Runs | NBM, IFS, AIFS, GFS, HRRR, ICON, GEM | about Jan 2024 | ≤ 7 days | your paid key | **Used above.** Paying doesn't extend the history. |
-| GribStream `/runs` | NBM (Oct 2020), GEFS (Oct 2020), GFS (Mar 2021), HRRR (2014), IFS (Mar 2024), AIFS (Feb 2025), +ensembles | see left | 2-16 days | free about 10k credits/day; Pro $9.90-$244.70/mo | **Best route to 6 winters × 16 days** |
-| AWS NBM GRIB2 (byte ranges) | NBM | Sep 2020 | 11 days | free | Works and matches GribStream, but **145 s CPU per run**: about 44 h for 6 winters |
-| AWS ECMWF open data | IFS/AIFS + 51-member ensemble | Jan 2023 | 15 days | free | Heavy global GRIB; fallback only |
-| GEFSv12 reforecast | GEFS, 5 members | 2000-2019 | 16 days (35 weekly) | free | About 23 MB per run-variable; use only if R5 needs 20 winters |
+- **All 80 winters:** median **13.6**, p10-p90 11.6-16.3. The last six winters were 14.1-15.2; decade medians range from 12.2 to 15.7, which looks like observer practice.
+- **Single storm days** (≥ 0.2" liquid): median 12.5, p10-p90 7.7-19.0 (n = 2,214).
+- **By month:** Nov 12.5, Dec 13.6, Jan 13.9, Feb 13.3, Mar 12.0, Apr 10.2.
+- **Temperature explains little:** r = -0.23 against Berthoud's mean temperature the day before.
+- **At elevation:** SNOTEL depth gain per inch of liquid is 8.3 (Berthoud) and 10.0 (Fool Creek). That's a floor, not the ratio, because new snow settles.
+- **Literature:** random-forest ratio methods reach MAE 2.9-3.7 vs 4-9 for operational methods (Veals 2025; Pletcher 2024).
+- **Next step:** ERA5 reanalysis (from 1940) can supply upper-air conditions for all 2,214 base storm days. That gives a long training set for a better ratio.
 
-**GribStream checks**
-- **NBM run 2025-01-01 12Z vs the raw AWS GRIB:** the snow ratio is identical at every lead. Precipitation and snow match exactly past 36 h.
-- **Hours 1-36:** values are 1-h totals rounded to 0.01", so summing six of them reads about 0.25 mm low per 6 h.
-- **Each model returns precipitation differently;** `research/gribstream.py` documents the format per model.
-- **Credits:** about 150 per run for NBM, all four sites together. The full 6-model backfill is about 585k credits.
-- **Free tier:** stopped after 45 NBM runs (about 10k credits a day), so the full backfill would take about 2 months.
+## R3. Archived forecasts
 
-## R5. Horizon (how far ahead is worth showing)
+| Source | What it has | Used |
+|---|---|---|
+| GribStream `/runs` | NBM 2020-, GFS 2021-, IFS 0.25° 2024-, AIFS 2025- at every lead, point queries | **Yes:** 6 winters, 2,700 runs |
+| Open-Meteo Previous Runs / Single Runs | 7 models from 2024 (≤ 7 days); IFS 9 km hindcasts from Mar 2024 | Early tests only |
+| AWS NBM GRIB2 | NBM 2020- | Cross-check only: matches GribStream; 145 s CPU per run |
 
-**So far, over 2 winters and days 1-7:**
-- Daily correlation falls from about 0.78 on day 1 to about 0.5 on day 5 and about 0.2-0.35 on day 7, for every model.
-- That's consistent with the literature: daily point precipitation has little useful skill past about day 5-7 (ECMWF headline scores; GEFS reforecast studies).
+**How each model's precipitation comes back** (all checked against the data):
 
-**Pending:** days 8-16 and multi-day totals or probabilities, using GribStream GEFS, GFS, IFS and NBM over 6 winters.
+| Model | Format |
+|---|---|
+| NBM | 1-h totals to 36 h, then 6-h totals (rounded to 0.01") |
+| IFS | running total, in metres |
+| AIFS | running total, in mm |
+| GFS (dropped) | 6-h buckets through 2024; running total from 2025 |
 
-## R6. Live pipeline (must equal the calibration source)
+## R4. Which models (same two winters for every model, 2024-03 to 2026-04)
 
-- **Open-Meteo (paid key):** one call returns all models at both points; history about 2 winters; 7-day archive. Cheapest and simplest.
-- **GribStream:** 6 winters of history, raw models and ensembles. Needs its own live calls (about 150-600 credits per refresh). The token has to stay server-side, in GitHub Actions.
-- **Leading option:** a GitHub Actions job using whichever source the backtest favors, with Open-Meteo for any model whose calibration it alone supports.
-- **Decision deferred until the 6-winter backtest shows whether the longer history actually improves calibration.**
+Skill by forecast day; the blend is the equal-weight mean of the calibrated NBM, IFS and AIFS. Day 1 / 3 / 5 / 7:
 
-## Methodology gotchas found (fixed in code)
+| | Base | Berthoud | Fool Creek |
+|---|---|---|---|
+| NBM | 0.63 / 0.43 / 0.26 / 0.23 | 0.64 / 0.42 / 0.24 / 0.19 | 0.62 / 0.44 / 0.25 / 0.20 |
+| ECMWF IFS 0.25° | 0.67 / 0.51 / 0.35 / 0.16 | 0.66 / 0.56 / 0.31 / 0.16 | 0.52 / 0.55 / 0.28 / 0.15 |
+| ECMWF AIFS (since Feb 2025) | 0.57 / 0.52 / 0.27 / 0.30 | 0.66 / 0.48 / 0.32 / 0.27 | 0.60 / 0.47 / 0.30 / 0.31 |
+| GFS (dropped) | 0.67 / 0.37 / 0.24 / 0.14 | 0.60 / 0.44 / 0.17 / 0.12 | 0.51 / 0.39 / 0.14 / 0.10 |
+| ECMWF IFS 9 km (dropped) | 0.61 / 0.39 / 0.33 / 0.12 | 0.65 / 0.53 / 0.28 / 0.17 | 0.57 / 0.42 / 0.29 / 0.13 |
+| **Blend** | **0.72 / 0.56 / 0.39 / 0.26** | **0.72 / 0.55 / 0.34 / 0.24** | **0.65 / 0.54 / 0.33 / 0.24** |
 
-- **NRCS dates each daily SNOTEL reading by the day it closes (24:00).** Misaligning by one day dropped the day-1 correlation from 0.78 to 0.15.
-- **A GribStream quota cut truncates the response it lands in,** while still returning HTTP 200. Requests are now one run each, and the last run before a quota stop is discarded.
+- **Adding GFS and IFS 9 km leaves the blend equal or worse.** Higher resolution (9 km vs 25 km) did not help once both are calibrated.
+- **These two winters were easier than average.** Over all six winters NBM scored 0.53-0.59 on day 1 (vs 0.62-0.64 here), so expect real skill somewhat below the table.
+- **Bias to correct** (measured ÷ forecast, day 1 / 3 / 7):
+
+| Model | Berthoud | Base |
+|---|---|---|
+| NBM | 1.51 / 1.12 / 0.96 | 1.00 / 0.68 / 0.59 |
+| IFS | 1.77 / 2.07 / 2.04 | 0.91 / 1.00 / 0.99 |
+| AIFS | 1.99 / 1.91 / 1.87 | 1.03 / 0.97 / 0.94 |
+
+  NBM's precipitation shrinks with lead; ECMWF's error doesn't. Calibration must be per site × model × lead.
+- **Dropped earlier:**
+  - **HRRR:** lost to NBM on day 1 at every gauge and only reaches day 2.
+  - **GEFS mean:** among the weakest at every lead.
+  - **GEM:** weaker than ECMWF everywhere in the two-winter Open-Meteo test.
+  - **ICON:** weaker at the base and Fool Creek but about equal at Berthoud (day 3 correlation 0.68 vs 0.69). Its runs end at day 7.5 and GribStream doesn't archive it, so it was never tested in the blend. It's an open candidate.
+- **Raw `snowfall` fields as-is** (Open-Meteo, base, measured ÷ forecast):
+
+| Model | Ratio |
+|---|---|
+| NBM | 0.88-1.00x |
+| ECMWF | 1.47x |
+| AIFS | 2.24x |
+| GEM | 2.1-2.4x |
+| ICON | 2.8-6.3x |
+| HRRR (which Open-Meteo stores as `gfs_seamless`) | 6.7-11.4x |
+
+## R5. How far ahead
+
+Blend skill, same winters as R4 (base / Berthoud / Fool Creek):
+
+| Forecast | Skill |
+|---|---|
+| Day 1 | 0.72 / 0.72 / 0.65 |
+| Day 3 | 0.56 / 0.55 / 0.54 |
+| Day 5 | 0.39 / 0.34 / 0.33 |
+| Day 7 | 0.26 / 0.24 / 0.24 |
+| Day 8 | 0.20 / 0.19 / 0.17 |
+| Day 10 | 0.08 / 0.07 / 0.07 |
+| Days 1-3 total | 0.73 / 0.70 / 0.67 |
+| Days 4-7 total | 0.50 / 0.48 / 0.48 |
+| Days 8-14 total | 0.40 / 0.28 / 0.30, but **-0.05 / -0.04 / 0.05** over the last 1.5 winters: not robust |
+
+**Show daily amounts for days 1-7, plus totals for days 1-3 and 4-7.** Nothing beyond day 8.
+
+## R6. Live pipeline and cost
+
+**GribStream** serves NBM, IFS and AIFS live, from the same API the calibration was fit on.
+
+| | |
+|---|---|
+| Credits per refresh (both forecast points) | about 300 |
+| Every 3 h | about 2.4k credits/day, within the free tier (about 6k/day observed) |
+| Hourly | about 7.2k/day: Pro, $9.90/mo |
+| Open-Meteo | not needed in the final design. ERA5, if the snow-ratio work uses it, is available without the paid plan for non-commercial use |
+
+## Gotchas found (fixed in code)
+
+- **NRCS dates each daily SNOTEL reading by the day it closes (24:00).** A one-day misalignment dropped the day-1 correlation from 0.78 to 0.15.
+- **GribStream quirks:**
+  - A quota cut truncates the response it lands in (HTTP 200), so batches are discarded on a quota stop.
+  - The API throttles request rate (429), and a single request may span at most 92 days.
+  - NOAA's missing value (9.999e20) can pass through.
+  - GFS switched formats in 2025, and tiny rounding dips can look like resets.
 - **Open-Meteo's `gfs_seamless` short-range archive is HRRR.**
-- **GribStream returns GFS as 6-hour buckets through 2024 but as running totals in 2025-26.** The format is detected per run.
-- **NBM hourly totals are rounded to 0.01".** That's fine for calibration, since its bias is lead-specific.
-
-## Decisions needed
-
-1. **Merge `record.py` and `.github/workflows/record.yml` to `main`.** Scheduled workflows only run from the default branch. Until it runs, no resort data is being saved.
-2. **Spend.** GribStream Pro 16x ($128.80/mo) covers the whole backfill (about 585k credits) in one day; downgrade once it finishes. After the backtest, keep one data provider and cancel the other. Ensemble members (GEFS 31, ECMWF 51) multiply credits per member, so they're excluded until the deterministic backtest shows where they'd help.
 
 ## Reproduce
 
-Current scripts:
-
 ```sh
-GRIBSTREAM_TOKEN=... python3 research/gribstream.py MODEL 2020 2025   # backfill, resumable
-python3 research/skill.py                                            # R4, R5 over six winters
+GRIBSTREAM_TOKEN=... python3 research/gribstream.py nbm|ifsoper|aifsoper   # backfill, resumable
+python3 research/skill.py [SINCE]          # R4/R5; R4 table: SINCE=2024-03-01
 ```
 
-Scripts whose job is done were removed; they live in commit `f9be182`:
+Scripts whose job is done live in git history:
 
-| Script | What it produced | How to run it |
+| Commit | Script | What it produced |
 |---|---|---|
-| `truth.py` | R1, R2 | `python3 research/truth.py` (NCEI is slow: about 20 min the first time) |
-| `openmeteo.py` | R4a, R4b | `OPENMETEO_APIKEY=... python3 research/openmeteo.py asis` (or `leads`) |
-| `nbm.py` | the raw AWS cross-check | `python3 research/nbm.py 2025-01-01T12` (needs `pip install eccodes`) |
+| `f9be182` | `truth.py` | R1, R2 |
+| `f9be182` | `openmeteo.py` | as-is bias, early lead tests |
+| `f9be182` | `nbm.py` | raw AWS cross-check |
+| `2d70f95` | `ifs9.py`, GFS decoding | dropped candidates |
 
-All downloads are cached in `.cache/` (gitignored). API keys come from the environment and never reach disk.
+Downloads are cached in `.cache/` (gitignored). API keys come from the environment and never reach disk.

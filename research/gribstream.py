@@ -10,8 +10,6 @@ cached.
 
 Precipitation comes back differently per model (checked on the 2025-03-15 12Z run):
   nbm            1-h totals to 36 h, then 6-h totals at 42, 48, ...; 3-hourly leads are NaN
-  gfs            6-h buckets (total since the last 00/06/12/18 h of lead) through 2024; running
-                 total from the start of the run in 2025-26. Tell them apart by whether values drop.
   aifsoper       running total from the start of the run (mm)
   ifsoper        running total from the start of the run (m)
 
@@ -30,7 +28,6 @@ from common import CACHE, SITES
 
 MODELS = {  # dataset: (max lead, archive start, [(name, level, info, alias)])
     "nbm": ("264h", "2020-10-01", [("APCP", "surface", "", "apcp"), ("ASNOW", "surface", "", "asnow")]),
-    "gfs": ("384h", "2021-03-22", [("APCP", "surface", "", "apcp")]),
     "ifsoper": ("360h", "2024-03-01", [("tp", "sfc", "", "apcp")]),
     "aifsoper": ("360h", "2025-02-25", [("tp", "sfc", "", "apcp")]),
 }

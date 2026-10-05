@@ -11,7 +11,7 @@ Scores per model x site x lead, leave-one-winter-out (fit on the other winters, 
          climatology = the site's mean for that calendar month. > 0 beats climatology.
 Also for multi-day totals, and for an equal-weight blend of the calibrated models.
 
-Usage: python3 research/skill.py   (after research/gribstream.py has filled .cache/gs/)
+Usage: python3 research/skill.py [SINCE_DATE]   (after gribstream.py has filled .cache/gs/)
 """
 import collections
 import csv
@@ -20,8 +20,8 @@ import statistics as st
 
 from common import CACHE, SNOTEL, coop_daily, season, snotel_hourly
 
-MODELS = ["nbm", "gfs", "ifsoper", "ifs9", "aifsoper"]
-BLENDS = {"blend all": MODELS, "blend ecmwf+nbm": ["nbm", "ifsoper", "aifsoper"]}  # equal-weight, calibrated
+MODELS = ["nbm", "ifsoper", "aifsoper"]
+BLENDS = {"blend": MODELS}                       # equal-weight mean of the calibrated models
 SITES = ["base", "berthoud", "foolcreek"]
 SPANS = {"1": (1, 1), "2": (2, 2), "3": (3, 3), "4": (4, 4), "5": (5, 5), "6": (6, 6), "7": (7, 7),
          "8": (8, 8), "10": (10, 10), "12": (12, 12), "14": (14, 14),
@@ -32,20 +32,17 @@ DAY = dt.timedelta(days=1)
 def intervals(model, values):
     """[(end_hour, hours, mm)] from one run's raw values {lead_h: value} (see gribstream.py)."""
     out = []
-    seq = [values[t] for t in sorted(values)]
-    running = model in ("ifsoper", "aifsoper") or (    # GFS switched from 6-h buckets to running totals in 2025
-        model == "gfs" and all(b >= a - 0.01 for a, b in zip(seq, seq[1:])))
-    if running:
+    if model in ("ifsoper", "aifsoper"):              # running totals
         scale = 1000 if model == "ifsoper" else 1
         prev_t, prev_v = 0, 0.0
         for t in sorted(values):
             if t > 0:
-                out.append((t, t - prev_t, (values[t] - prev_v) * scale))
+                out.append((t, t - prev_t, max(0.0, values[t] - prev_v) * scale))
                 prev_t, prev_v = t, values[t]
     for t, v in values.items():
-        if model == "ifs9" and t >= 1 or model == "nbm" and 1 <= t <= 36:
+        if model == "nbm" and 1 <= t <= 36:
             out.append((t, 1, v))
-        elif model in ("nbm", "gfs") and not running and t % 6 == 0 and (model != "nbm" or t > 36):
+        elif model == "nbm" and t > 36 and t % 6 == 0:
             out.append((t, 6, v))
     return out
 
@@ -125,8 +122,10 @@ def skill(cal):
     return 1 - sse / sse_clim
 
 
-def main():
-    data = {m: load(m) for m in MODELS}
+def main(since="2020-01-01"):
+    """since: score only runs from this date, so models with different archives compare fairly."""
+    since = dt.date.fromisoformat(since)
+    data = {m: {k: v for k, v in load(m).items() if k[0] >= since} for m in MODELS}
     obs = truth(2020, 2025)
     for site in SITES:
         print(f"\n== {site}: skill vs climatology [correlation] by forecast day; > 0 beats climatology")
@@ -156,4 +155,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(*sys.argv[1:])
