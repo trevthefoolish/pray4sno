@@ -20,7 +20,8 @@ import statistics as st
 
 from common import CACHE, SNOTEL, coop_daily, season, snotel_hourly
 
-MODELS = ["nbm", "gefsatmosmean", "gfs", "ifsoper", "ifs9", "aifsoper"]
+MODELS = ["nbm", "gfs", "ifsoper", "ifs9", "aifsoper"]
+BLENDS = {"blend all": MODELS, "blend ecmwf+nbm": ["nbm", "ifsoper", "aifsoper"]}  # equal-weight, calibrated
 SITES = ["base", "berthoud", "foolcreek"]
 SPANS = {"1": (1, 1), "2": (2, 2), "3": (3, 3), "4": (4, 4), "5": (5, 5), "6": (6, 6), "7": (7, 7),
          "8": (8, 8), "10": (10, 10), "12": (12, 12), "14": (14, 14),
@@ -42,9 +43,9 @@ def intervals(model, values):
                 out.append((t, t - prev_t, (values[t] - prev_v) * scale))
                 prev_t, prev_v = t, values[t]
     for t, v in values.items():
-        if model in ("hrrr", "ifs9") and t >= 1 or model == "nbm" and 1 <= t <= 36:
+        if model == "ifs9" and t >= 1 or model == "nbm" and 1 <= t <= 36:
             out.append((t, 1, v))
-        elif model in ("nbm", "gefsatmosmean", "gfs") and not running and t % 6 == 0 and (model != "nbm" or t > 36):
+        elif model in ("nbm", "gfs") and not running and t % 6 == 0 and (model != "nbm" or t > 36):
             out.append((t, 6, v))
     return out
 
@@ -57,7 +58,7 @@ def load(model):
         raw = collections.defaultdict(dict)
         with path.open() as f:
             for row in csv.DictReader(f):
-                if row["apcp"] not in ("", "NaN"):
+                if row["apcp"] not in ("", "NaN") and float(row["apcp"]) < 1000:   # NOAA missing = 9.999e20
                     t = round((dt.datetime.fromisoformat(row["forecasted_time"][:19]) - run).total_seconds() / 3600)
                     raw[row["name"]][t] = float(row["apcp"])
         for site, values in raw.items():
@@ -117,7 +118,8 @@ def skill(cal):
         by_wm[(season(d), d.month)].append(o)
     sse = sse_clim = 0.0
     for d, (f, o) in cal.items():
-        clim = [x for (w, m), v in by_wm.items() if m == d.month and w != season(d) for x in v]
+        clim = ([x for (w, m), v in by_wm.items() if m == d.month and w != season(d) for x in v] or
+                [x for (w, m), v in by_wm.items() if w != season(d) for x in v])
         sse += (f - o) ** 2
         sse_clim += (st.mean(clim) - o) ** 2
     return 1 - sse / sse_clim
@@ -138,14 +140,15 @@ def main():
                 r = st.correlation([p[1] for p in ps], [p[2] for p in ps]) if cal else 0
                 cells.append(f"{skill(cal):+.2f} [{r:.2f}]" if cal else "")
             print(f"{m:14}" + "".join(f"{c:>12}" for c in cells))
-        cells = []
-        for k in SPANS:
-            members = [c for (m, kk), c in cals.items() if kk == k and c]
-            dates = set().union(*members) if members else set()
-            blend = {d: (st.mean(c[d][0] for c in members if d in c), next(c[d][1] for c in members if d in c))
-                     for d in dates}
-            cells.append(f"{skill(blend):+.2f}" if blend else "")
-        print(f"{'blend':14}" + "".join(f"{c:>12}" for c in cells))
+        for name, models in BLENDS.items():
+            cells = []
+            for k in SPANS:
+                members = [cals[(m, k)] for m in models if cals[(m, k)]]
+                dates = set().union(*members) if members else set()
+                blend = {d: (st.mean(c[d][0] for c in members if d in c), next(c[d][1] for c in members if d in c))
+                         for d in dates}
+                cells.append(f"{skill(blend):+.2f}" if blend else "")
+            print(f"{name:14}" + "".join(f"{c:>12}" for c in cells))
         bias = {m: [sum(p[2] for p in pairs(data[m], obs[site], site, n, n)) /
                     max(1e-9, sum(p[1] for p in pairs(data[m], obs[site], site, n, n))) for n in (1, 3, 7)]
                 for m in MODELS}
