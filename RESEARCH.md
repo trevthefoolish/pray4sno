@@ -152,8 +152,11 @@ The same blend scored on Open-Meteo's archive (same winters; day 1 / 3 / 5 / 7):
   - *Cold* is the fraction of such hours. Light snow the models miss only happens when it's cold, so a warm dry day forecasts exactly zero.
   - The three models are averaged.
 - **Snow:** liquid × 15.2.
-- **Low-high range:** the 10th-90th percentile of what actually fell on past days with a similar forecast. That's grouped by days 1-2, 3-4 and 5-7, and by dry / light / heavy (< 0.05", 0.05-0.2", > 0.2" liquid).
-  - The page widens the range if needed so it always contains the number shown.
+- **"Up to":** the 90th percentile of what actually fell on past days with a similar forecast, times the fraction of cold hours, so warm days show nothing. That's grouped by days 1-2, 3-4 and 5-7, and by dry / light / heavy (< 0.05", 0.05-0.2", > 0.2" liquid).
+- **Display:**
+  - The page shows 0 when the average is under 1". The average is right on average but turns frequent light snow into "1" almost every winter day at the peak.
+  - "Up to X" appears only when X is above the number shown.
+  - The 3-day headline sums the uncut averages, so it stays unbiased.
 
 Out-of-sample scores (each winter scored by a fit on the others), days 1-7:
 
@@ -162,8 +165,8 @@ Out-of-sample scores (each winter scored by a fit on the others), days 1-7:
 | Base snow skill (vs measured snowfall) | 0.61 | 0.66 | 0.52 | 0.41 | 0.34 | 0.27 | 0.24 |
 | Base liquid skill | 0.66 | 0.66 | 0.52 | 0.42 | 0.34 | 0.25 | 0.20 |
 | Peak liquid skill (vs Berthoud) | 0.67 | 0.65 | 0.54 | 0.42 | 0.39 | 0.26 | 0.21 |
-| Base range holds the outcome | 90% | 90% | 91% | 89% | 91% | 88% | 90% |
-| Peak range holds the outcome | 94% | 93% | 92% | 90% | 94% | 94% | 94% |
+| Base: real amount at or under "up to" | 88% | 88% | 88% | 87% | 89% | 87% | 88% |
+| Peak: real amount at or under "up to" | 90% | 91% | 89% | 89% | 91% | 91% | 92% |
 
 **Variants tested** (base snow skill, days 1 / 2 / 3 / 5 / 7):
 
@@ -180,6 +183,19 @@ Out-of-sample scores (each winter scored by a fit on the others), days 1-7:
 - **Separate snow ratios per forecast day** scored the same as one.
 - **The spread between the three calibrated models** held the outcome only 9-60% of the time as a range, far too narrow.
 
+**What number to show** (day 1; false alarm = says ≥ 1" on a day with nothing measured; peak truth is Berthoud liquid × 15.2):
+
+| Option | Peak false alarms | Base false alarms | Big days caught (≥ 4", shown as ≥ 2"), peak / base | Light days caught (≥ 1"), peak / base | Accuracy score, peak / base, days 1 / 5 |
+|---|---|---|---|---|---|
+| Average | 88% | 10% | 93% / 83% | 98% / 95% | 0.67, 0.39 / 0.61, 0.34 |
+| **Average, 0 under 1" (kept)** | **16%** | **5%** | **93% / 83%** | 70% / 80% | 0.65, 0.39 / 0.60, 0.30 |
+| Typical amount (median) | 12% | 6% | 93% / 67% | 64% / 86% | 0.57, 0.26 / 0.48, 0.23 |
+| Quantile-matched | 29% | 8% | 93% / 85% | 76% / 90% | 0.55, 0.11 / 0.56, **-0.24** |
+
+Cutoffs of 1.5" and 2" missed too many snow days.
+
+**Rain/snow cutoff check** (snow days caught, day 1): base 95% with the rule vs 94% without; peak 98% vs 100% (5 of 251 light days missed, 1 of 82 big ones).
+
 **Caveats:**
 - Peak snow can't be scored, because nothing measures snowfall up there. The peak uses the base's ratio, which is likely conservative.
 - Ranges run wider than a strict 80% because many days are exactly zero on both sides.
@@ -189,6 +205,14 @@ Out-of-sample scores (each winter scored by a fit on the others), days 1-7:
 
 - **One request from the browser** to Open-Meteo's paid API: three models, base and peak, hourly precipitation and temperature.
 - **The page applies `calibration.json` with the same formula,** checked against an independent Python recomputation of the same live data.
+- **Storm replay:** the run issued 12Z on 12 April 2026, fed through the page:
+
+| Base, 13-19 Apr | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
+|---|---|---|---|---|---|---|---|
+| Page | 0 | 2 | 2 | 0 | 0 | 3 | 0 |
+| Measured | 0 | 2 | 6 | 0 | 0 | 3 | 0 |
+
+  Timing was right on all seven days. Wednesday's 6" exceeded its "up to 4": the 1-in-10 case.
 - **It shows** the next-3-days total, then snow and range for each of 7 days at the peak and the base. No libraries, no server.
 - **The API key is in the page source.** Accepted: no overage charges, and the key can be rotated.
 

@@ -31,7 +31,7 @@
     <thead><tr><th></th></tr></thead>
     <tbody></tbody>
   </table>
-  <p class="note">Inches of new snow in the 24 hours ending 8 AM, with the likely range.</p>
+  <p class="note">Inches of new snow in the 24 hours ending 8 AM. "Up to" covers 9 in 10 outcomes.</p>
 </main>
 <script>
 const API = "https://customer-api.open-meteo.com/v1/forecast";
@@ -67,14 +67,14 @@ function forecast(cal, loc, point, ends) {
         const h = hours[m][end];
         const cold = h.filter(([, c]) => c).length / 24;
         const coldLiquid = h.reduce((s, [p, c]) => s + (c ? p : 0), 0) / 25.4;
-        return Math.max(0, a * cold + b * coldLiquid);
+        return { liquid: Math.max(0, a * cold + b * coldLiquid), cold };
       });
     if (!members.length) return null;
-    const liq = members.reduce((s, x) => s + x, 0) / members.length;
+    const mean = xs => xs.reduce((s, x) => s + x, 0) / xs.length;
+    const liq = mean(members.map(x => x.liquid));
     const bin = cal.bins.filter(e => liq >= e).length;
-    const [lo, hi] = cal.ranges[point][cal.leads[k + 1]][bin];
-    const snow = liq * cal.snow_ratio;                 // the range always contains the number shown
-    return { snow, lo: Math.min(lo * cal.snow_ratio, snow), hi: Math.max(hi * cal.snow_ratio, snow) };
+    const upto = cal.upto[point][cal.leads[k + 1]][bin] * mean(members.map(x => x.cold)) * cal.snow_ratio;
+    return { snow: liq * cal.snow_ratio, upto };
   });
 }
 
@@ -92,6 +92,7 @@ async function main() {
   const rows = Object.fromEntries(points.map((p, i) => [p, forecast(cal, locs[i], p, ends)]));
 
   const fmt = x => Math.round(x);
+  const shown = d => (d.snow < 1 ? 0 : fmt(d.snow));    // under 1" shows 0: cuts false alarms (RESEARCH.md)
   const total = p => rows[p].slice(0, 3).reduce((s, d) => s + (d ? d.snow : 0), 0);
   document.getElementById("headline").innerHTML =
     `Next 3 days: <b>${fmt(total("peak"))}″</b> at the peak, <b>${fmt(total("base"))}″</b> at the base`;
@@ -101,7 +102,8 @@ async function main() {
   document.querySelector("tbody").innerHTML = points.map(p =>
     `<tr><th>${LABELS[p][0]}<small>${LABELS[p][1]}</small></th>` +
     rows[p].map(d => d === null ? "<td>–</td>" :
-      `<td><b class="${fmt(d.snow) ? "" : "zero"}">${fmt(d.snow)}</b><small>${fmt(d.lo)}–${fmt(d.hi)}</small></td>`).join("") +
+      `<td><b class="${shown(d) ? "" : "zero"}">${shown(d)}</b>` +
+      `<small>${fmt(d.upto) > shown(d) ? `up to ${fmt(d.upto)}` : "&nbsp;"}</small></td>`).join("") +
     "</tr>").join("");
   document.getElementById("forecast").hidden = false;
 }

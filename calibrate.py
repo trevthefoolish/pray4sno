@@ -4,8 +4,8 @@ For each point (base, peak), forecast day 1-7 (24 h ending 08:00 MST) and model 
 ECMWF AIFS):  liquid = a * cold + b * cold liquid, where cold liquid is the model's precipitation in
 hours at or below 1 C and cold is the fraction of such hours (light snow the models miss only happens
 when it's cold; rain counts as nothing). The forecast is the mean of the three, and
-snow = liquid * one snow-to-liquid ratio. The low-high range is the 10th-90th percentile of what
-actually fell on past days with a similar forecast.
+snow = liquid * one snow-to-liquid ratio. "Up to" is the 90th percentile of what actually fell
+on past days with a similar forecast, scaled by the fraction of cold hours (warm days: nothing).
 Truth: base = Winter Park COOP gauge (liquid and measured snowfall, read 08:00);
        peak = Berthoud Summit SNOTEL liquid (no snowfall is measured up there).
 Scores are leave-one-winter-out: fit on the other winters, score the held-out one.
@@ -28,8 +28,8 @@ MODELS = {"nbm": "ncep_nbm_conus", "ifs": "ecmwf_ifs025", "aifs": "ecmwf_aifs025
 DAYS = range(1, 8)
 SNOW_C = 1.0                            # at or below this 2 m temperature, precipitation counts as snow
 WINTERS = (2023, 2024, 2025)            # Nov-Apr seasons; the archive starts Jan 2024
-BINS = [0.05, 0.2]                      # forecast liquid (in): dry, light, heavy, for the range lookup
-LEADS = {1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 2, 7: 2}   # days 1-2, 3-4, 5-7 share a range table
+BINS = [0.05, 0.2]                      # forecast liquid (in): dry, light, heavy, for the "up to" lookup
+LEADS = {1: 0, 2: 0, 3: 1, 4: 1, 5: 2, 6: 2, 7: 2}   # days 1-2, 3-4, 5-7 share an "up to" table
 DAY = dt.timedelta(days=1)
 
 
@@ -93,8 +93,9 @@ def truth():
 
 
 def fit(fc, obs, point, train):
-    """Fit everything on the winters in `train`. Returns (coef, blend):
-    coef {(model, n): (a, b)}, blend {(n, date): calibrated mean liquid} over all dates."""
+    """Fit everything on the winters in `train`. Returns (coef, blend, cold):
+    coef {(model, n): (a, b)}; blend and cold {(n, date): mean over models} of calibrated liquid
+    and of the cold-hour fraction, over all dates."""
     coef = {}
     for m in MODELS:
         for n in DAYS:
@@ -105,27 +106,28 @@ def fit(fc, obs, point, train):
                 s12 = sum(c * x for (c, x), _ in pts); det = s11 * s22 - s12 * s12
                 s1y = sum(c * y for (c, _), y in pts); s2y = sum(x * y for (_, x), y in pts)
                 coef[(m, n)] = ((s1y * s22 - s2y * s12) / det, (s2y * s11 - s1y * s12) / det)
-    members = collections.defaultdict(list)
+    members, cold = collections.defaultdict(list), collections.defaultdict(list)
     for (m, p, n, d), (c, x) in fc.items():
         if p == point and (m, n) in coef:
             a, b = coef[(m, n)]
             members[(n, d)].append(max(0.0, a * c + b * x))
-    return coef, {k: st.mean(v) for k, v in members.items()}
+            cold[(n, d)].append(c)
+    return coef, {k: st.mean(v) for k, v in members.items()}, {k: st.mean(v) for k, v in cold.items()}
 
 
 def bin_of(x):
     return sum(x >= e for e in BINS)
 
 
-def ranges(blend, obs, point, train):
-    """{(lead group, bin): (p10, p90)} of observed liquid on training days with a similar forecast."""
+def upto(blend, obs, point, train):
+    """{(lead group, bin): 90th percentile} of observed liquid on training days with a similar forecast."""
     seen, pooled = collections.defaultdict(list), collections.defaultdict(list)
     for (n, d), f in blend.items():
         if season(d) in train and d in obs[point]:
             seen[(LEADS[n], bin_of(f))].append(obs[point][d][1])
             pooled[bin_of(f)].append(obs[point][d][1])
     q = lambda v, p: sorted(v)[min(len(v) - 1, int(p * len(v)))]
-    return {(g, k): (q(v, .1), q(v, .9)) for g in set(LEADS.values()) for k in range(len(BINS) + 1)
+    return {(g, k): q(v, .9) for g in set(LEADS.values()) for k in range(len(BINS) + 1)
             for v in [seen[(g, k)] if len(seen[(g, k)]) >= 10 else pooled[k]]}
 
 
@@ -152,8 +154,8 @@ def main():
         liq, snow, hits = collections.defaultdict(list), collections.defaultdict(list), collections.Counter()
         for w in WINTERS:
             train = [x for x in WINTERS if x != w]
-            _, blend = fit(fc, obs, point, train)
-            rng = ranges(blend, obs, point, train)
+            _, blend, cold = fit(fc, obs, point, train)
+            top = upto(blend, obs, point, train)
             ratio = snow_ratio(fit(fc, obs, "base", train)[1], obs, train)
             for (n, d), f in blend.items():
                 if season(d) == w and d in obs[point]:
@@ -161,22 +163,21 @@ def main():
                     liq[n].append((d, f, o))
                     if s is not None:
                         snow[n].append((d, f * ratio, s))
-                    lo, hi = rng[(LEADS[n], bin_of(f))]
-                    hits[n] += lo - 0.005 <= o <= hi + 0.005
+                    hits[n] += o <= top[(LEADS[n], bin_of(f))] * cold[(n, d)] + 0.005
         scores[point] = {"liquid_skill": [round(skill(liq[n]), 2) for n in DAYS],
-                         "range_coverage": [round(hits[n] / len(liq[n]), 2) for n in DAYS]}
+                         "upto_coverage": [round(hits[n] / len(liq[n]), 2) for n in DAYS]}
         if snow:
             scores[point]["snow_skill"] = [round(skill(snow[n]), 2) for n in DAYS]
         print(point, scores[point])
 
     calibration = {"points": POINTS, "models": MODELS, "snow_c": SNOW_C, "bins": BINS, "leads": LEADS, "scores": scores}
     for point in POINTS:                                    # final fit on every winter
-        coef, blend = fit(fc, obs, point, WINTERS)
+        coef, blend, _ = fit(fc, obs, point, WINTERS)
         calibration.setdefault("coef", {})[point] = {m: [[round(x, 4) for x in coef[(m, n)]] for n in DAYS]
                                                      for m in MODELS}
-        rng = ranges(blend, obs, point, WINTERS)
-        calibration.setdefault("ranges", {})[point] = [[[round(x, 2) for x in rng[(g, k)]] for k in range(len(BINS) + 1)]
-                                                       for g in sorted(set(LEADS.values()))]
+        top = upto(blend, obs, point, WINTERS)
+        calibration.setdefault("upto", {})[point] = [[round(top[(g, k)], 2) for k in range(len(BINS) + 1)]
+                                                     for g in sorted(set(LEADS.values()))]
     calibration["snow_ratio"] = round(snow_ratio(fit(fc, obs, "base", WINTERS)[1], obs, WINTERS), 2)
     (HERE / "calibration.json").write_text(json.dumps(calibration, indent=1))
     print(f"snow ratio {calibration['snow_ratio']:.1f}:1; wrote calibration.json")
