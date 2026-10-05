@@ -1,6 +1,6 @@
 # Research: forecasting snow at Winter Park
 
-Phase 1 is complete. Every number below comes from a script; see [Reproduce](#reproduce).
+Phases 1 (research) and 2 (calibration) are complete. Every number below comes from a script; see [Reproduce](#reproduce).
 
 **Conventions:**
 - "Liquid" means water equivalent.
@@ -20,9 +20,9 @@ Phase 1 is complete. Every number below comes from a script; see [Reproduce](#re
    - Day 8 is marginal.
    - Day 10 and beyond show no reliable skill. The days 8-14 total flips between "some skill" and none depending on which winters are scored.
    - Multi-day totals for days 1-3 and 4-7 hold up well (R5).
-4. **Snow-to-liquid ratio is the next big lever.**
-   - The base's median is 13.6:1 over 80 winters, but a single day varies from 7.7 to 19:1 (p10-p90).
-   - Temperature alone explains little.
+4. **Snow = calibrated liquid × 14.7.**
+   - One fitted ratio beat a temperature-dependent ratio and NBM's own snowfall (Phase 2).
+   - A single day's true ratio still varies from 7.7 to 19:1. A learned ratio (ERA5 + machine learning) is the open improvement.
 5. **One data provider, and Open-Meteo is enough.**
    - It serves the same three models live and archived, and its blend scores within 0.08 of GribStream's (R6).
    - It's callable from a browser with no key.
@@ -157,6 +157,41 @@ The same blend scored on Open-Meteo's archive (same winters; day 1 / 3 / 5 / 7):
 | Hourly | about 7.2k/day: Pro, $9.90/mo |
 | Open-Meteo | not needed in the final design. ERA5, if the snow-ratio work uses it, is available without the paid plan for non-commercial use |
 
+## Phase 2: the calibration the page applies (`calibrate.py` → `calibration.json`)
+
+**How the forecast is built:**
+- **Days:** 24 h ending 08:00 MST, matching the base gauge and the morning snow report.
+- **Liquid:** for each point × forecast day × model (NBM, IFS, AIFS), liquid = a + b · model liquid. The three are averaged.
+- **Snow:** liquid × 14.7.
+- **Low-high range:** the 10th-90th percentile of what actually fell on past days with a similar forecast. That's grouped by days 1-2, 3-4 and 5-7, and by dry / light / heavy (< 0.05", 0.05-0.2", > 0.2" liquid).
+
+Out-of-sample scores (each winter scored by a fit on the others), days 1-7:
+
+| | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| Base snow skill (vs measured snowfall) | 0.64 | 0.61 | 0.53 | 0.39 | 0.28 | 0.25 | 0.20 |
+| Base liquid skill | 0.70 | 0.64 | 0.55 | 0.43 | 0.31 | 0.26 | 0.19 |
+| Peak liquid skill (vs Berthoud) | 0.67 | 0.64 | 0.55 | 0.42 | 0.38 | 0.26 | 0.20 |
+| Base range holds the outcome | 89% | 88% | 88% | 88% | 90% | 88% | 89% |
+| Peak range holds the outcome | 96% | 95% | 91% | 91% | 94% | 94% | 94% |
+
+**Snow conversion methods tested** (base snow skill, days 1 / 2 / 3):
+
+| Method | Skill |
+|---|---|
+| **One fitted ratio, no intercept (kept)** | **0.64 / 0.61 / 0.53** |
+| Ratio varying with forecast temperature | 0.55 / 0.60 / 0.46 |
+| NBM's own snowfall, calibrated | 0.57 / 0.46 / 0.28 |
+
+Separate ratios per forecast day scored the same as one (14.0-16.3 vs 14.7).
+
+**Ranges tested:** the spread between the three calibrated models held the outcome only 9-60% of the time, far too narrow.
+
+**Caveats:**
+- Peak snow can't be scored, because nothing measures snowfall up there. The peak uses the base's ratio, which is likely conservative since the peak is colder.
+- Ranges run wider than a strict 80% because many days are exactly zero on both sides.
+- Only two winters of Open-Meteo archive exist; recalibrate each spring.
+
 ## Gotchas found (fixed in code)
 
 - **NRCS dates each daily SNOTEL reading by the day it closes (24:00).** A one-day misalignment dropped the day-1 correlation from 0.78 to 0.15.
@@ -170,18 +205,18 @@ The same blend scored on Open-Meteo's archive (same winters; day 1 / 3 / 5 / 7):
 ## Reproduce
 
 ```sh
-OPENMETEO_APIKEY=... python3 research/openmeteo.py   # Open-Meteo archive (paid API)
-python3 research/skill.py 2024-03-01       # R5 and the Open-Meteo rows of R6
+OPENMETEO_APIKEY=... python3 calibrate.py   # fits, scores and writes calibration.json
 ```
 
-Scripts whose job is done live in git history:
+The research scripts live in git history:
 
 | Commit | Script | What it produced |
 |---|---|---|
 | `f9be182` | `truth.py` | R1, R2 |
 | `f9be182` | `openmeteo.py` (old) | as-is bias, early lead tests |
 | `f9be182` | `nbm.py` | raw AWS cross-check |
-| `ff7801a` | `gribstream.py`, `skill.py` (GribStream source) | the R4 table and the GribStream rows of R6 |
+| `ff7801a` | `gribstream.py`, `skill.py` (GribStream source) | R4 table, GribStream rows of R6 |
 | `2d70f95` | `ifs9.py`, GFS decoding | dropped candidates |
+| `2d194e7` | `openmeteo.py`, `skill.py` (Open-Meteo) | R5, Open-Meteo rows of R6 |
 
 Downloads are cached in `.cache/` (gitignored). The API key comes from the environment.
