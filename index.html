@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pray4sno · Winter Park</title>
+<style>
+  :root { --bg: #fff; --fg: #111; --dim: #8a8f98; --line: #e4e6ea; --snow: #1f6feb; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0d1117; --fg: #e6edf3; --dim: #7d8590; --line: #262c36; --snow: #58a6ff; } }
+  body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
+         font: 16px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  #headline { font-size: 15px; color: var(--dim); margin: 0 0 20px; }
+  #headline b { color: var(--fg); }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { padding: 8px 2px; text-align: center; border-bottom: 1px solid var(--line); }
+  thead th { font-size: 13px; font-weight: 500; color: var(--dim); }
+  tbody th { text-align: left; font-size: 14px; width: 72px; white-space: nowrap; }
+  td b { display: block; font-size: 20px; color: var(--snow); font-variant-numeric: tabular-nums; }
+  td b.zero { color: var(--dim); font-weight: 400; }
+  small { display: block; font-size: 11px; color: var(--dim); font-weight: 400; font-variant-numeric: tabular-nums; }
+  p.note { font-size: 13px; color: var(--dim); margin: 16px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Winter Park snow</h1>
+  <p id="headline">Loading…</p>
+  <table id="forecast" hidden>
+    <thead><tr><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p class="note">Inches of new snow in the 24 hours ending 8 AM. "Up to" covers 9 in 10 outcomes.</p>
+</main>
+<script>
+const API = "https://customer-api.open-meteo.com/v1/forecast";
+const KEY = "bSvD5raxPiFWRcz4";
+const LABELS = { peak: ["Peak", "12,000 ft"], base: ["Base", "9,100 ft"] };
+const DAYS = 7;
+
+// Hour ending t (UTC) belongs to the window ending at the first 15:00 UTC (08:00 MST) at or after t.
+function windowEnd(t) {
+  const d = new Date(t);
+  if (d.getUTCHours() * 60 + d.getUTCMinutes() > 15 * 60) d.setUTCDate(d.getUTCDate() + 1);
+  d.setUTCHours(15, 0, 0, 0);
+  return d.getTime();
+}
+
+// Same formula as calibrate.py: per model, liquid = a * cold + b * cold liquid, where cold hours are
+// at or below cal.snow_c; the mean of the models times the snow ratio is the snow.
+function forecast(cal, loc, point, ends) {
+  const hours = {};                                    // model -> window end -> [[mm, cold?] per hour]
+  for (const model in cal.models) {
+    hours[model] = {};
+    loc.hourly.time.forEach((t, i) => {
+      const p = loc.hourly[`precipitation_${cal.models[model]}`][i];
+      const c = loc.hourly[`temperature_2m_${cal.models[model]}`][i];
+      if (p !== null && c !== null) (hours[model][windowEnd(t + "Z")] ||= []).push([p, c <= cal.snow_c]);
+    });
+  }
+  return ends.map((end, k) => {
+    const members = Object.keys(cal.models)
+      .filter(m => hours[m][end]?.length === 24)
+      .map(m => {
+        const [a, b] = cal.coef[point][m][k];
+        const h = hours[m][end];
+        const cold = h.filter(([, c]) => c).length / 24;
+        const coldLiquid = h.reduce((s, [p, c]) => s + (c ? p : 0), 0) / 25.4;
+        return { liquid: Math.max(0, a * cold + b * coldLiquid), cold };
+      });
+    if (!members.length) return null;
+    const mean = xs => xs.reduce((s, x) => s + x, 0) / xs.length;
+    const liq = mean(members.map(x => x.liquid));
+    const bin = cal.bins.filter(e => liq >= e).length;
+    const upto = cal.upto[point][cal.leads[k + 1]][bin] * mean(members.map(x => x.cold)) * cal.snow_ratio;
+    return { snow: liq * cal.snow_ratio, upto };
+  });
+}
+
+async function main() {
+  const cal = await (await fetch("calibration.json")).json();
+  const points = Object.keys(LABELS);
+  const url = `${API}?latitude=${points.map(p => cal.points[p][0])}&longitude=${points.map(p => cal.points[p][1])}` +
+    `&hourly=precipitation,temperature_2m&models=${Object.values(cal.models)}&past_days=1&forecast_days=9&timezone=GMT&apikey=${KEY}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`forecast service returned ${res.status}`);
+  const locs = await res.json();
+
+  const first = windowEnd(new Date(Date.now() + 60000).toISOString());   // next 8 AM report
+  const ends = Array.from({ length: DAYS }, (_, k) => first + k * 86400000);
+  const rows = Object.fromEntries(points.map((p, i) => [p, forecast(cal, locs[i], p, ends)]));
+
+  const fmt = x => Math.round(x);
+  const shown = d => (d.snow < 1 ? 0 : fmt(d.snow));    // under 1" shows 0: cuts false alarms (RESEARCH.md)
+  const total = p => rows[p].slice(0, 3).reduce((s, d) => s + (d ? d.snow : 0), 0);
+  document.getElementById("headline").innerHTML =
+    `Next 3 days: <b>${fmt(total("peak"))}″</b> at the peak, <b>${fmt(total("base"))}″</b> at the base`;
+
+  const day = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "America/Denver" });
+  document.querySelector("thead tr").insertAdjacentHTML("beforeend", ends.map(e => `<th>${day.format(e)}</th>`).join(""));
+  document.querySelector("tbody").innerHTML = points.map(p =>
+    `<tr><th>${LABELS[p][0]}<small>${LABELS[p][1]}</small></th>` +
+    rows[p].map(d => d === null ? "<td>–</td>" :
+      `<td><b class="${shown(d) ? "" : "zero"}">${shown(d)}</b>` +
+      `<small>${fmt(d.upto) > shown(d) ? `up to ${fmt(d.upto)}` : "&nbsp;"}</small></td>`).join("") +
+    "</tr>").join("");
+  document.getElementById("forecast").hidden = false;
+}
+
+main().catch(e => { document.getElementById("headline").textContent = `Forecast unavailable: ${e.message}`; });
+</script>
+</body>
+</html>
