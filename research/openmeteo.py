@@ -5,11 +5,12 @@ Day N of the 12Z run on date R = the 24 h ending 12Z on R+N, summed from `precip
 (each hour as forecast N x 24 h before it). Leads run about 12 h longer than a single run's day N,
 so these scores are slightly conservative next to run-based archives.
 
-Usage: python3 research/openmeteo.py
+Usage: OPENMETEO_APIKEY=... python3 research/openmeteo.py
 """
 import collections
 import datetime as dt
 import json
+import os
 
 from common import CACHE, SITES, get_json
 
@@ -21,8 +22,9 @@ def fetch(model, winter):
     lats = ",".join(str(a) for a, _ in SITES.values())
     lons = ",".join(str(b) for _, b in SITES.values())
     hourly = ",".join(f"precipitation_previous_day{n}" for n in DAYS)
-    url = (f"https://previous-runs-api.open-meteo.com/v1/forecast?latitude={lats}&longitude={lons}&hourly={hourly}"
-           f"&models={model}&start_date={winter}-10-31&end_date={winter + 1}-05-01")
+    url = (f"https://customer-previous-runs-api.open-meteo.com/v1/forecast?latitude={lats}&longitude={lons}"
+           f"&hourly={hourly}&models={model}&start_date={winter}-10-31&end_date={winter + 1}-05-01"
+           f"&apikey={os.environ['OPENMETEO_APIKEY']}")
     return get_json(url)
 
 
