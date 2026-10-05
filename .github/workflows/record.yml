@@ -1,0 +1,29 @@
+name: record
+# Hourly snapshot of the resort's own snow report (see record.py), committed to the `data` branch.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency: record
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Snapshot into the data branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch --depth=1 origin data; then
+            git worktree add --detach store FETCH_HEAD
+          else
+            git worktree add --detach store "$(git commit-tree "$(git hash-object -w -t tree /dev/null)" -m 'Start data branch')"
+          fi
+          python3 record.py store/resort
+          cd store
+          git add resort
+          git commit -q -m "Record resort snapshot"
+          git push origin HEAD:refs/heads/data
