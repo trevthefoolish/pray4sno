@@ -1,0 +1,18 @@
+/* pray4sno.ski's design: plain text in one mono face, one size, one weight, black on white (white on black in
+   dark mode), a blank line between blocks. The block sits in the middle of the screen, its lines flush left. */
+:root { --bg: #fff; --fg: #000; --muted: #6b6b6b; }
+@media (prefers-color-scheme: dark) { :root { --bg: #000; --fg: #fff; --muted: #9c9c9c; color-scheme: dark; } }
+body { margin: 0; min-height: 100vh; min-height: 100svh; display: grid; place-items: center;
+       background: var(--bg); color: var(--fg); line-height: 1.5;
+       font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+       font-size: min(20px, calc((100vw - 32px) / 19.2)); }
+h1, h2, p, th, td, table { margin: 0; font: inherit; }
+.wrap { box-sizing: border-box; padding: 1.5em 16px; display: grid; gap: 1.5em; }
+h2, .muted { color: var(--muted); }
+a { color: inherit; }
+/* the corner button: a circled "i" to the stats, a circled "x" back. A 44px tap target, top right. */
+.corner { position: absolute; top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right));
+          width: 44px; height: 44px; display: grid; place-items: center; color: inherit; text-decoration: none;
+          font-size: 18px; line-height: 1; }
+.corner span { box-sizing: border-box; width: 1.5em; height: 1.5em; display: grid; place-items: center;
+               border: 1.5px solid; border-radius: 50%; }

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>pray4sno: stats</title>
+<link rel="stylesheet" href="site.css">
+<style>
+  .wrap { width: min(100%, calc(32ch + 32px)); }
+  section { display: grid; gap: 0.15em; min-width: 0; }
+  section p + p { margin-top: 0.75em; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header><h1>pray4sno: stats</h1><p id="written">loading...</p></header>
+  <section id="doing"><h2>how i'm doing</h2></section>
+  <section id="thinking"><h2>what i'm thinking</h2></section>
+  <footer class="muted"><p>each day: new sno in the 24 hours to 8 am. the odds of 1" or more, and how much if it comes.</p>
+    <p>written by claude, twice a day.</p></footer>
+</main>
+<a class="corner" href="./" aria-label="back to the forecast"><span>x</span></a>
+<script>
+// Written by the forecaster routine (FORECASTER.md) to the data branch.
+const SRC = "https://raw.githubusercontent.com/trevthefoolish/pray4sno/data/stats.json";
+const when = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "numeric", day: "numeric",
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "America/Denver" });
+const fill = (id, paras) => document.getElementById(id).append(...paras.map(t => Object.assign(document.createElement("p"), { textContent: t })));
+
+fetch(SRC, { cache: "no-store" })
+  .then(r => { if (!r.ok) throw new Error(r.status === 404 ? "nothing written yet." : `stats returned ${r.status}`); return r.json(); })
+  .then(s => {
+    document.getElementById("written").textContent = when.format(new Date(s.written)).toLowerCase().replaceAll(",", "");
+    fill("doing", s.doing);
+    fill("thinking", s.thinking);
+  })
+  .catch(e => { document.getElementById("written").textContent = e.message; });
+</script>
+</body>
+</html>

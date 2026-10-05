@@ -1,11 +1,11 @@
 # Research: forecasting snow at Winter Park
 
-The evidence behind every choice in `calibrate.py` and `index.html`.
+The evidence behind every choice in `calibrate.py`, `index.html` and `score.py`.
 
 **Conventions:**
 - "Liquid" means water equivalent.
-- Seasons run Nov-Apr and are named by their starting year.
-- **Skill** = 1 − (squared error ÷ squared error of the monthly average), out of sample. 0 means no better than climatology; 1 means perfect.
+- Seasons run Oct-May and are named by their starting year. The fit uses Nov-Apr.
+- **Skill** = 1 − (squared error ÷ squared error of the monthly average), out of sample. 0 means no better than climatology; 1 means perfect. For odds (0-1 against snowed or not), the squared error is the Brier score, so this is the Brier skill score.
 
 ## Decisions
 
@@ -13,9 +13,9 @@ The evidence behind every choice in `calibrate.py` and `index.html`.
 2. **Calibrate per point × model × forecast day.**
    - Raw model liquid is about right at the base but 1.3-2x too low up high, by different amounts per model and lead.
    - Raw model `snowfall` fields are off by up to 11x.
-3. **Only cold precipitation counts.** Precipitation in hours at or below 1 °C becomes snow at 15.2:1; rain counts as nothing.
+3. **Only cold precipitation counts.** Precipitation in hours at or below 1 °C counts; rain counts as nothing.
 4. **Show days 1-7.** Skill is near zero by day 10, and the week-2 total isn't robust.
-5. **Show 0 under 1", plus "up to X".** That cuts the peak's false alarms from 88% to 16% without losing big days.
+5. **Show the odds of 1" or more, and the 10-90% range of the snow on those days, as pray4sno.ski does.** Every day 1-7 whose odds round to 10% or more gets a row. The odds are reliable at both points (day-1 Brier skill: base 0.64, peak 0.33). A 20% day that stays dry is an honest 1 in 5, not a false alarm.
 6. **One data source: Open-Meteo's paid API**, for calibration and for the page.
 
 ## Ground truth
@@ -31,6 +31,10 @@ The evidence behind every choice in `calibrate.py` and `index.html`.
 - **Nothing measures snowfall at the peak**, about 12,000 ft at Panoramic Express. The resort's Summit reports, once recorded, are the only check.
 - **Gauges undercatch snow in wind.** The COOP gauge misses up to about 70% (Yang 1998); SNOTEL about 30% at 2-4 m/s (Fassnacht 2004).
 - **NRCS dates each daily SNOTEL reading by the day it closes (24:00).** Getting this wrong by a day dropped the day-1 correlation from 0.78 to 0.15.
+- **Berthoud reports liquid in 0.1" steps.** At 15.2:1, the peak's "1 inch or more" means any measurable precipitation (1.5"), which falls on about half of winter days.
+- **In October and May some of Berthoud's liquid is rain,** so the peak is fitted and scored Nov-Apr only. The base gauge measures snowfall itself, so it is scored Oct-May.
+- **What's current:** RCC-ACIS (`data.rcc-acis.org`) has the COOP a day after; NCEI runs a week or more behind. SNOTEL `PREC` restarts each water year on Oct 1 (on 5 Oct 2026 nothing had posted since). The resort feed sleeps until opening (last update 28 Sep 2026).
+- **What already exists:** NBM publishes snow-exceedance probabilities only out to about 54 h, in 6 h windows, so it can't give 24 h odds for days 1-7.
 
 ## Snow-to-liquid ratio (base)
 
@@ -89,21 +93,30 @@ Same two winters for every model (2024-03 to 2026-04). Skill day 1 / 3 / 5 / 7:
 - **Per point × day × model:** liquid = a × cold + b × cold liquid.
   - *Cold liquid* is precipitation in hours ≤ 1 °C.
   - *Cold* is the fraction of such hours, so a warm day forecasts zero.
-- **Snow:** the mean of the three models × 15.2.
-- **"Up to":** the 90th percentile of past outcomes, by days 1-2 / 3-4 / 5-7 and dry / light / heavy forecast (< 0.05", 0.05-0.2", > 0.2" liquid), times the cold fraction.
-- **Peak truth** is Berthoud's liquid. The peak uses the base's ratio, which is probably conservative.
+- **Odds and range:** the mean of the three models falls in one of six bins (< 0.01", 0.01-0.03", 0.03-0.06", 0.06-0.12", 0.12-0.25", ≥ 0.25" liquid). That bin's past days, for days 1-2 / 3-4 / 5-7, give the odds of 1"+ and the 10th-90th percentile of the snow on the days it came.
+  - Under 30 past days: the lead groups are pooled.
+  - No past days (warm days at the peak, which the winter fit never saw): 0%.
+- **Peak truth** is Berthoud's liquid × 15.2, the base's ratio, which is probably conservative.
+- **`clim`:** each month's share of days with 1"+, the reference for scoring live.
 - **Refit each spring.**
 
 Out of sample, days 1-7:
 
-| | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+| Brier skill, Nov-Apr | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
 |---|---|---|---|---|---|---|---|
-| Base snow skill (vs measured snowfall) | 0.61 | 0.66 | 0.52 | 0.41 | 0.34 | 0.27 | 0.24 |
-| Peak liquid skill (vs Berthoud) | 0.67 | 0.65 | 0.54 | 0.42 | 0.39 | 0.26 | 0.21 |
-| Base: real amount ≤ "up to" | 88% | 88% | 88% | 87% | 89% | 87% | 88% |
-| Peak: real amount ≤ "up to" | 90% | 91% | 89% | 89% | 91% | 91% | 92% |
+| Base (vs measured snowfall) | 0.64 | 0.58 | 0.50 | 0.46 | 0.35 | 0.26 | 0.25 |
+| Peak (vs Berthoud) | 0.33 | 0.29 | 0.27 | 0.19 | 0.20 | 0.15 | 0.13 |
 
-**Variants that lost** (base snow skill, days 1 / 2 / 3 / 5 / 7):
+- **October and May at the base,** days 1-7 together: 0.36.
+- **Reliability,** odds shown → share of those days with 1"+:
+  - Base: 10 → 6, 20 → 24, 30 → 24, 40 → 38, 50 → 50, 60 → 43, 70 → 71, 80 → 82, 90 → 87.
+  - Peak: 20 → 34, 30 → 31, 40 → 43, 50 → 44, 60 → 54, 70 → 74, 80 → 82, 90 → 90.
+- **The 10-90% range holds** 86% of snow days at the base and 91% at the peak. That's wider than 80% because snow comes in whole inches, and in 1.5" steps up high.
+- **Bins,** Brier skill over days 1-7, base / peak: 4 bins 0.40 / 0.17; **6 bins 0.425 / 0.219**; 8 bins 0.425 / 0.222. The tie goes to fewer.
+- **Fitting Oct-May instead** tied at the base. At the peak, Oct-May truth is partly rain, so it can't be judged.
+- **A separate bin for warm days** changed nothing: they already land in the driest bin.
+
+**Variants that lost,** scored on the average when the page showed it (base snow skill, days 1 / 2 / 3 / 5 / 7):
 
 | Variant | Skill |
 |---|---|
@@ -118,26 +131,24 @@ Out of sample, days 1-7:
   - As a range, the spread between the models held the outcome only 9-60% of the time.
 - **The cutoff's cost:** it misses 5 of 251 light snow days at the peak and 1 of 82 big ones. At the base it catches more snow days (95% vs 94% on day 1).
 
-**What number to show** (day 1; false alarm = ≥ 1" shown, nothing measured):
-
-| Option | False alarms, peak / base | Big days (≥ 4" shown ≥ 2") | Light days (≥ 1") | Score, peak / base, days 1 / 5 |
-|---|---|---|---|---|
-| Average | 88% / 10% | 93% / 83% | 98% / 95% | 0.67, 0.39 / 0.61, 0.34 |
-| **Average, 0 under 1"** | **16% / 5%** | **93% / 83%** | 70% / 80% | 0.65, 0.39 / 0.60, 0.30 |
-| Median | 12% / 6% | 93% / 67% | 64% / 86% | 0.57, 0.26 / 0.48, 0.23 |
-| Quantile-matched | 29% / 8% | 93% / 85% | 76% / 90% | 0.55, 0.11 / 0.56, -0.24 |
-
 ## Page (`index.html`)
 
-- **How it works:** one request from the browser for three models, base and peak, hourly precipitation and temperature. It applies `calibration.json` with the same formula, which was checked against an independent Python recomputation.
-- **What it shows:** the 3-day total (uncut averages), then 7 days of snow with "up to".
+- **How it works:** one request from the browser for three models, base and peak, hourly precipitation and temperature. It applies `calibration.json` with the same formula as `score.py now`, which matched the page cell for cell.
+- **What it shows:** every day 1-7 whose odds round to 10% or more at either point, as `lo-hi" NN%`. A blank cell means under 5%. With no such day: `no sno in sight through <day 7>.`
 - **The API key is in the page source.** Accepted: there are no overage charges and the key can be rotated.
-- **Storm replay,** using the run from 12Z on 12 April 2026 (base, 13-19 Apr): page 0 2 2 0 0 3 0; measured 0 2 6 0 0 3 0. Timing was right on all seven days. The 6" beat its "up to 4", the 1-in-10 case.
+
+## Stats and the forecaster (`stats.html`, `FORECASTER.md`, `score.py`)
+
+- **A Claude Code routine runs `FORECASTER.md` twice a day** (09:22 and 15:22 Denver). It reads the NWS Boulder discussion and the upper air, and writes `stats.json` to the `data` branch, which `stats.html` shows.
+- **It also sets its own odds for days 1-3,** logged next to the page's in the `data` branch's `log/YYYY-MM.jsonl`. `score.py record` scores both against the gauges with `clim` as the reference.
+- **It has to earn its place:** a sample written on 5 Oct 2026 caught what the table can't see (a trough on 12 Oct, Hurricane Rachel's moisture in ECMWF but not GFS). If by 1 May 2027 its Brier score on days 1-3 isn't lower than the page's at both points, delete the routine, `FORECASTER.md` and "what i'm thinking".
 
 ## Reproduce
 
 ```sh
 OPENMETEO_APIKEY=... python3 calibrate.py   # prints the scores above, writes calibration.json
+python3 score.py now                        # the page's days 1-7
+python3 score.py record STORE               # page vs forecaster so far, from a checkout of the data branch
 ```
 
 The research scripts are in git history: `f9be182` (ground truth, ratios), `ff7801a` (model selection), `2d194e7` (Open-Meteo skill).
