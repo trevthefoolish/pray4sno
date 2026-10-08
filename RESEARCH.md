@@ -1,5 +1,7 @@
 # Research: forecasting snow at Winter Park
 
+> **Update, 7 Oct 2026:** this is no longer what runs pray4sno.ski. On the 2025–26 replay, the site's current method beat a corrected NBM + IFS blend with a monthly snow ratio, a close cousin of the design below, on the published snow forecast (inches and odds). The water findings below still hold.
+
 The evidence behind every choice in `calibrate.py` and `index.html`.
 
 **Conventions:**
