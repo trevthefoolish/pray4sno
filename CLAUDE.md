@@ -1,4 +1,4 @@
-**Mission:** the most accurate snow forecast for Winter Park Resort.
+**Mission:** the most accurate snow forecast for Winter Park Resort. Accuracy means the published forecast, scored against what fell.
 
 1. **Research first.** Before building, find the ground truth, the full record, and what already exists, from primary sources.
 2. **Question everything.** Every requirement and claim is unproven until real data says otherwise.
